@@ -1,6 +1,5 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from pydantic import field_validator
 
 
 # Request/Response schemas for routing endpoint
@@ -119,3 +118,28 @@ class OpenRouterKeyStatusResponse(BaseModel):
     status: str = "ok"
     configured: bool
     message: str
+
+
+# MovieShaker showcase schemas
+class ShowcaseModel(BaseModel):
+    id: str
+    name: str
+    provider: str
+    best_for: List[str]
+    strengths: List[str]
+    limitations: List[str]
+    output_specs: str
+    estimated_cost: str
+    use_cases: List[str]
+
+
+class ShowcaseCategory(BaseModel):
+    title: str
+    icon: str
+    description: str
+    models: List[ShowcaseModel]
+
+
+class ModelsShowcaseResponse(BaseModel):
+    status: str = "ok"
+    categories: Dict[str, ShowcaseCategory]

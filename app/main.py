@@ -8,9 +8,10 @@ from app.schemas import (
     ModelsResponse, ModelInfo,
     UpdateOpenRouterKeyRequest, TestOpenRouterKeyRequest,
     TestOpenRouterKeyResponse, OpenRouterKeyStatusResponse,
-    SuccessResponse
+    SuccessResponse, ModelsShowcaseResponse, ShowcaseCategory, ShowcaseModel
 )
 from app.models_data import OPENROUTER_MODELS
+from app.movieshaker_models_data import MOVIESHAKER_MODELS, CATEGORIES
 from app.config_manager import (
     save_openrouter_key, is_key_configured, test_openrouter_key
 )
@@ -174,6 +175,25 @@ async def get_models(api_key: str = Depends(verify_api_key)):
     """
     models = [ModelInfo(**model) for model in OPENROUTER_MODELS]
     return ModelsResponse(models=models)
+
+
+@app.get("/api/models-showcase", response_model=ModelsShowcaseResponse)
+async def get_models_showcase():
+    """
+    Get categorized AI models showcase for MovieShaker.
+    Returns detailed information about models organized by use case.
+    No authentication required - public information page.
+    """
+    categories = {}
+    for category_id, category_data in MOVIESHAKER_MODELS.items():
+        categories[category_id] = ShowcaseCategory(
+            title=category_data["title"],
+            icon=category_data["icon"],
+            description=category_data["description"],
+            models=[ShowcaseModel(**model) for model in category_data["models"]]
+        )
+    
+    return ModelsShowcaseResponse(categories=categories)
 
 
 @app.get("/api/config/openrouter-key/status", response_model=OpenRouterKeyStatusResponse)
@@ -980,6 +1000,455 @@ async def config_page():
         
         // Initialize
         checkStatus();
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
+
+
+@app.get("/models-showcase", response_class=HTMLResponse)
+async def models_showcase_page():
+    """
+    MovieShaker AI Models Showcase Page.
+    Beautiful information display of AI models categorized by use case.
+    No authentication required - public information page.
+    """
+    html_content = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Models Showcase - MovieShaker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 36px;
+            color: #1e3c72;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 18px;
+            color: #666;
+        }
+        
+        .nav-pills {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 30px 0;
+        }
+        
+        .nav-pill {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 50px;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .nav-pill:hover {
+            border-color: #2a5298;
+            background: #f0f7ff;
+            transform: translateY(-2px);
+        }
+        
+        .nav-pill.active {
+            background: #2a5298;
+            border-color: #2a5298;
+            color: white;
+        }
+        
+        .category-section {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+        
+        .category-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #f0f0f0;
+        }
+        
+        .category-icon {
+            font-size: 48px;
+        }
+        
+        .category-title h2 {
+            font-size: 32px;
+            color: #1e3c72;
+        }
+        
+        .category-title p {
+            font-size: 16px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .models-grid {
+            display: grid;
+            gap: 30px;
+            margin-top: 30px;
+        }
+        
+        .model-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 30px;
+            transition: all 0.3s;
+        }
+        
+        .model-card:hover {
+            border-color: #2a5298;
+            box-shadow: 0 8px 24px rgba(42, 82, 152, 0.15);
+            transform: translateY(-4px);
+        }
+        
+        .model-header {
+            margin-bottom: 20px;
+        }
+        
+        .model-name {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1e3c72;
+            margin-bottom: 5px;
+        }
+        
+        .model-provider {
+            font-size: 14px;
+            color: #888;
+        }
+        
+        .model-section {
+            margin-bottom: 20px;
+        }
+        
+        .model-section h4 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .tag {
+            background: #f0f7ff;
+            color: #2a5298;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            border: 1px solid #d0e7ff;
+        }
+        
+        .tag.strength {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-color: #c8e6c9;
+        }
+        
+        .tag.limitation {
+            background: #fff3e0;
+            color: #e65100;
+            border-color: #ffe0b2;
+        }
+        
+        .text-list {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .text-list li {
+            padding: 6px 0;
+            padding-left: 20px;
+            position: relative;
+            line-height: 1.6;
+            color: #555;
+        }
+        
+        .text-list li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #2a5298;
+            font-weight: bold;
+        }
+        
+        .model-specs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        
+        .spec-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .spec-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .spec-value {
+            font-size: 16px;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        .footer {
+            text-align: center;
+            color: white;
+            padding: 40px 20px;
+            font-size: 14px;
+        }
+        
+        .footer a {
+            color: white;
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 28px;
+            }
+            
+            .nav-pills {
+                gap: 8px;
+            }
+            
+            .nav-pill {
+                padding: 10px 16px;
+                font-size: 14px;
+            }
+            
+            .category-section {
+                padding: 20px;
+            }
+            
+            .model-card {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 AI Models Showcase</h1>
+            <p>Explore AI tools for film and music production</p>
+        </div>
+        
+        <div class="nav-pills" id="categoryNav">
+            <div class="nav-pill active" data-category="all">
+                ✨ All Models
+            </div>
+        </div>
+        
+        <div id="categoriesContainer"></div>
+        
+        <div class="footer">
+            <p>Powered by OpenRouter Gateway | <a href="/">Back to Home</a></p>
+        </div>
+    </div>
+    
+    <script>
+        let showcaseData = {};
+        
+        // Fetch and display models
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/models-showcase');
+                const data = await response.json();
+                showcaseData = data.categories;
+                
+                // Build category navigation
+                const nav = document.getElementById('categoryNav');
+                for (const [catId, catData] of Object.entries(showcaseData)) {
+                    const pill = document.createElement('div');
+                    pill.className = 'nav-pill';
+                    pill.dataset.category = catId;
+                    pill.innerHTML = `${catData.icon} ${catData.title}`;
+                    pill.addEventListener('click', () => filterCategory(catId));
+                    nav.appendChild(pill);
+                }
+                
+                // Display all categories
+                displayAllCategories();
+                
+            } catch (error) {
+                console.error('Error loading models:', error);
+                document.getElementById('categoriesContainer').innerHTML = 
+                    '<div class="category-section"><p>Error loading models. Please try again later.</p></div>';
+            }
+        }
+        
+        function filterCategory(categoryId) {
+            // Update active pill
+            document.querySelectorAll('.nav-pill').forEach(pill => {
+                pill.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            if (categoryId === 'all') {
+                displayAllCategories();
+            } else {
+                displayCategory(categoryId);
+            }
+        }
+        
+        function displayAllCategories() {
+            const container = document.getElementById('categoriesContainer');
+            container.innerHTML = '';
+            
+            for (const [catId, catData] of Object.entries(showcaseData)) {
+                container.appendChild(createCategorySection(catId, catData));
+            }
+        }
+        
+        function displayCategory(categoryId) {
+            const container = document.getElementById('categoriesContainer');
+            container.innerHTML = '';
+            
+            const catData = showcaseData[categoryId];
+            if (catData) {
+                container.appendChild(createCategorySection(categoryId, catData));
+            }
+        }
+        
+        function createCategorySection(categoryId, categoryData) {
+            const section = document.createElement('div');
+            section.className = 'category-section';
+            section.id = `category-${categoryId}`;
+            
+            let html = `
+                <div class="category-header">
+                    <div class="category-icon">${categoryData.icon}</div>
+                    <div class="category-title">
+                        <h2>${categoryData.title}</h2>
+                        <p>${categoryData.description}</p>
+                    </div>
+                </div>
+                <div class="models-grid">
+            `;
+            
+            categoryData.models.forEach(model => {
+                html += createModelCard(model);
+            });
+            
+            html += '</div>';
+            section.innerHTML = html;
+            
+            return section;
+        }
+        
+        function createModelCard(model) {
+            return `
+                <div class="model-card">
+                    <div class="model-header">
+                        <div class="model-name">${model.name}</div>
+                        <div class="model-provider">by ${model.provider}</div>
+                    </div>
+                    
+                    <div class="model-section">
+                        <h4>Best For</h4>
+                        <div class="tag-list">
+                            ${model.best_for.map(item => `<span class="tag">${item}</span>`).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="model-section">
+                        <h4>Strengths</h4>
+                        <div class="tag-list">
+                            ${model.strengths.map(item => `<span class="tag strength">✓ ${item}</span>`).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="model-section">
+                        <h4>Limitations</h4>
+                        <div class="tag-list">
+                            ${model.limitations.map(item => `<span class="tag limitation">! ${item}</span>`).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="model-section">
+                        <h4>Use Cases</h4>
+                        <ul class="text-list">
+                            ${model.use_cases.map(useCase => `<li>${useCase}</li>`).join('')}
+                        </ul>
+                    </div>
+                    
+                    <div class="model-specs">
+                        <div class="spec-item">
+                            <div class="spec-label">Output</div>
+                            <div class="spec-value">${model.output_specs}</div>
+                        </div>
+                        <div class="spec-item">
+                            <div class="spec-label">Estimated Cost</div>
+                            <div class="spec-value">${model.estimated_cost}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Load models on page load
+        loadModels();
     </script>
 </body>
 </html>

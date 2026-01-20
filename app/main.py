@@ -12,6 +12,7 @@ from app.schemas import (
 )
 from app.models_data import OPENROUTER_MODELS
 from app.movieshaker_models_data import MOVIESHAKER_MODELS, CATEGORIES
+from app.openrouter_models_showcase import OPENROUTER_SHOWCASE, OPENROUTER_CATEGORIES
 from app.config_manager import (
     save_openrouter_key, is_key_configured, test_openrouter_key
 )
@@ -237,17 +238,22 @@ async def update_openrouter_key(request: UpdateOpenRouterKeyRequest, api_key: st
 @app.get("/models", response_class=HTMLResponse)
 async def models_page():
     """
-    HTML page for browsing OpenRouter models.
-    Features a searchable dropdown and displays model overview when selected.
-    Does not require authentication - public facing page.
+    OpenRouter Models Showcase Page.
+    Beautiful information display of OpenRouter models categorized by movieshaker.com use cases.
+    No authentication required - public information page.
     """
+    import json
+    
+    # Inject the OpenRouter showcase data into the HTML
+    data_json = json.dumps(OPENROUTER_SHOWCASE)
+    
     html_content = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenRouter Models - Gateway</title>
+    <title>OpenRouter Models - MovieShaker</title>
     <style>
         * {
             margin: 0;
@@ -260,150 +266,257 @@ async def models_page():
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
+            color: #333;
         }
         
         .container {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
         }
         
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
             text-align: center;
         }
         
         .header h1 {
-            font-size: 28px;
+            font-size: 36px;
+            color: #667eea;
             margin-bottom: 10px;
         }
         
         .header p {
-            opacity: 0.9;
-            font-size: 14px;
-        }
-        
-        .content {
-            padding: 30px;
-        }
-        
-        .search-section {
-            margin-bottom: 30px;
-        }
-        
-        label {
-            display: block;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 8px;
-        }
-        
-        #modelSearch {
-            width: 100%;
-            padding: 12px 16px;
-            font-size: 16px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            outline: none;
-            transition: border-color 0.3s;
-        }
-        
-        #modelSearch:focus {
-            border-color: #667eea;
-        }
-        
-        #modelSelect {
-            width: 100%;
-            padding: 12px 16px;
-            font-size: 16px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            outline: none;
-            margin-top: 10px;
-            cursor: pointer;
-            transition: border-color 0.3s;
-        }
-        
-        #modelSelect:focus {
-            border-color: #667eea;
-        }
-        
-        .overview-section {
-            display: none;
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .overview-section.active {
-            display: block;
-            animation: fadeIn 0.3s;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .overview-section h2 {
-            color: #667eea;
-            font-size: 20px;
-            margin-bottom: 15px;
-        }
-        
-        .info-row {
-            margin-bottom: 12px;
-            display: flex;
-            align-items: baseline;
-        }
-        
-        .info-label {
-            font-weight: 600;
-            color: #555;
-            min-width: 100px;
-        }
-        
-        .info-value {
-            color: #333;
-            word-break: break-all;
-        }
-        
-        .badge {
-            display: inline-block;
-            background: #667eea;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 20px;
+            font-size: 18px;
             color: #666;
         }
         
-        .error {
-            background: #fee;
-            border-left: 4px solid #f44;
-            padding: 15px;
-            border-radius: 4px;
-            color: #c00;
+        .nav-pills {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 30px 0;
+        }
+        
+        .nav-pill {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 50px;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .nav-pill:hover {
+            border-color: #667eea;
+            background: #f0f7ff;
+            transform: translateY(-2px);
+        }
+        
+        .nav-pill.active {
+            background: #667eea;
+            border-color: #667eea;
+            color: white;
+        }
+        
+        .category-section {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+        
+        .category-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #f0f0f0;
+        }
+        
+        .category-icon {
+            font-size: 48px;
+        }
+        
+        .category-title h2 {
+            font-size: 32px;
+            color: #667eea;
+        }
+        
+        .category-title p {
+            font-size: 16px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .models-grid {
+            display: grid;
+            gap: 30px;
+            margin-top: 30px;
+        }
+        
+        .model-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 30px;
+            transition: all 0.3s;
+        }
+        
+        .model-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.15);
+            transform: translateY(-4px);
+        }
+        
+        .model-header {
             margin-bottom: 20px;
         }
         
-        .count {
-            text-align: center;
-            color: #666;
+        .model-name {
+            font-size: 24px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .model-provider {
             font-size: 14px;
+            color: #888;
+        }
+        
+        .model-section {
+            margin-bottom: 20px;
+        }
+        
+        .model-section h4 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .tag {
+            background: #f0f7ff;
+            color: #667eea;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            border: 1px solid #d0e7ff;
+        }
+        
+        .tag.strength {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-color: #c8e6c9;
+        }
+        
+        .tag.limitation {
+            background: #fff3e0;
+            color: #e65100;
+            border-color: #ffe0b2;
+        }
+        
+        .text-list {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .text-list li {
+            padding: 6px 0;
+            padding-left: 20px;
+            position: relative;
+            line-height: 1.6;
+            color: #555;
+        }
+        
+        .text-list li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .model-specs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
             margin-top: 20px;
+        }
+        
+        .spec-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .spec-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .spec-value {
+            font-size: 16px;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        .footer {
+            text-align: center;
+            color: white;
+            padding: 40px 20px;
+            font-size: 14px;
+        }
+        
+        .footer a {
+            color: white;
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 28px;
+            }
+            
+            .nav-pills {
+                gap: 8px;
+            }
+            
+            .nav-pill {
+                padding: 10px 16px;
+                font-size: 14px;
+            }
+            
+            .category-section {
+                padding: 20px;
+            }
+            
+            .model-card {
+                padding: 20px;
+            }
         }
     </style>
 </head>
@@ -411,164 +524,158 @@ async def models_page():
     <div class="container">
         <div class="header">
             <h1>🤖 OpenRouter Models</h1>
-            <p>Browse and explore available AI models</p>
+            <p>AI models available through OpenRouter for film and music production</p>
         </div>
         
-        <div class="content">
-            <div id="errorMessage" class="error" style="display: none;"></div>
-            
-            <div class="search-section">
-                <label for="modelSearch">Search Models</label>
-                <input type="text" id="modelSearch" placeholder="Type to search models..." />
-                
-                <label for="modelSelect" style="margin-top: 20px;">Select a Model</label>
-                <select id="modelSelect" size="10">
-                    <option value="">Loading models...</option>
-                </select>
-                
-                <div class="count" id="modelCount"></div>
+        <div class="nav-pills" id="categoryNav">
+            <div class="nav-pill active" data-category="all">
+                ✨ All Models
             </div>
-            
-            <div id="modelOverview" class="overview-section">
-                <h2>Model Overview</h2>
-                <div class="info-row">
-                    <span class="info-label">Model ID:</span>
-                    <span class="info-value" id="modelId"></span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Name:</span>
-                    <span class="info-value" id="modelName"></span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Provider:</span>
-                    <span class="info-value"><span class="badge" id="modelProvider"></span></span>
-                </div>
-            </div>
+        </div>
+        
+        <div id="categoriesContainer"></div>
+        
+        <div class="footer">
+            <p>Powered by OpenRouter Gateway | <a href="/">Back to Home</a> | <a href="/models-showcase">View All AI Tools</a></p>
         </div>
     </div>
     
     <script>
-        let allModels = [];
-        let filteredModels = [];
+        let showcaseData = {};
         
-        const searchInput = document.getElementById('modelSearch');
-        const selectElement = document.getElementById('modelSelect');
-        const overviewSection = document.getElementById('modelOverview');
-        const errorMessage = document.getElementById('errorMessage');
-        const modelCount = document.getElementById('modelCount');
+        // Inline data - OpenRouter models only
+        const OPENROUTER_DATA = """ + data_json + """;
         
-        // Fetch models from API on page load
-        async function fetchModels() {
-            try {
-                // Prompt for API key
-                const apiKey = prompt('Please enter your API key (X-Internal-API-Key):');
-                if (!apiKey) {
-                    showError('API key is required to view models.');
-                    return;
-                }
-                
-                const response = await fetch('/api/models', {
-                    headers: {
-                        'X-Internal-API-Key': apiKey
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                allModels = data.models || [];
-                filteredModels = [...allModels];
-                
-                populateSelect(filteredModels);
-                updateCount();
-                
-            } catch (error) {
-                showError('Failed to load models: ' + error.message);
+        // Load and display models
+        function loadModels() {
+            showcaseData = OPENROUTER_DATA;
+            
+            // Build category navigation
+            const nav = document.getElementById('categoryNav');
+            for (const [catId, catData] of Object.entries(showcaseData)) {
+                const pill = document.createElement('div');
+                pill.className = 'nav-pill';
+                pill.dataset.category = catId;
+                pill.innerHTML = `${catData.icon} ${catData.title}`;
+                pill.addEventListener('click', () => filterCategory(catId));
+                nav.appendChild(pill);
             }
+            
+            // Display all categories
+            displayAllCategories();
         }
         
-        // Populate select element with models
-        function populateSelect(models) {
-            selectElement.innerHTML = '';
-            
-            if (models.length === 0) {
-                const option = document.createElement('option');
-                option.value = '';
-                option.textContent = 'No models found';
-                selectElement.appendChild(option);
-                return;
-            }
-            
-            models.forEach(model => {
-                const option = document.createElement('option');
-                option.value = model.id;
-                option.textContent = `${model.name} (${model.provider})`;
-                option.dataset.model = JSON.stringify(model);
-                selectElement.appendChild(option);
+        function filterCategory(categoryId) {
+            // Update active pill
+            document.querySelectorAll('.nav-pill').forEach(pill => {
+                pill.classList.remove('active');
             });
-        }
-        
-        // Filter models based on search input
-        function filterModels() {
-            const query = searchInput.value.toLowerCase();
+            event.target.classList.add('active');
             
-            if (!query) {
-                filteredModels = [...allModels];
+            if (categoryId === 'all') {
+                displayAllCategories();
             } else {
-                filteredModels = allModels.filter(model => 
-                    model.name.toLowerCase().includes(query) ||
-                    model.id.toLowerCase().includes(query) ||
-                    (model.provider && model.provider.toLowerCase().includes(query))
-                );
-            }
-            
-            populateSelect(filteredModels);
-            updateCount();
-        }
-        
-        // Display model overview
-        function displayModelOverview() {
-            const selectedOption = selectElement.options[selectElement.selectedIndex];
-            
-            if (!selectedOption || !selectedOption.value) {
-                overviewSection.classList.remove('active');
-                return;
-            }
-            
-            const model = JSON.parse(selectedOption.dataset.model);
-            
-            document.getElementById('modelId').textContent = model.id;
-            document.getElementById('modelName').textContent = model.name;
-            document.getElementById('modelProvider').textContent = model.provider || 'N/A';
-            
-            overviewSection.classList.add('active');
-        }
-        
-        // Show error message
-        function showError(message) {
-            errorMessage.textContent = message;
-            errorMessage.style.display = 'block';
-        }
-        
-        // Update model count display
-        function updateCount() {
-            if (allModels.length === 0) {
-                modelCount.textContent = '';
-            } else if (filteredModels.length === allModels.length) {
-                modelCount.textContent = `Showing all ${allModels.length} models`;
-            } else {
-                modelCount.textContent = `Showing ${filteredModels.length} of ${allModels.length} models`;
+                displayCategory(categoryId);
             }
         }
         
-        // Event listeners
-        searchInput.addEventListener('input', filterModels);
-        selectElement.addEventListener('change', displayModelOverview);
+        function displayAllCategories() {
+            const container = document.getElementById('categoriesContainer');
+            container.innerHTML = '';
+            
+            for (const [catId, catData] of Object.entries(showcaseData)) {
+                container.appendChild(createCategorySection(catId, catData));
+            }
+        }
         
-        // Initialize
-        fetchModels();
+        function displayCategory(categoryId) {
+            const container = document.getElementById('categoriesContainer');
+            container.innerHTML = '';
+            
+            const catData = showcaseData[categoryId];
+            if (catData) {
+                container.appendChild(createCategorySection(categoryId, catData));
+            }
+        }
+        
+        function createCategorySection(categoryId, categoryData) {
+            const section = document.createElement('div');
+            section.className = 'category-section';
+            section.id = `category-${categoryId}`;
+            
+            let html = `
+                <div class="category-header">
+                    <div class="category-icon">${categoryData.icon}</div>
+                    <div class="category-title">
+                        <h2>${categoryData.title}</h2>
+                        <p>${categoryData.description}</p>
+                    </div>
+                </div>
+                <div class="models-grid">
+            `;
+            
+            categoryData.models.forEach(model => {
+                html += createModelCard(model);
+            });
+            
+            html += '</div>';
+            section.innerHTML = html;
+            
+            return section;
+        }
+        
+        function createModelCard(model) {
+            return `
+                <div class="model-card">
+                    <div class="model-header">
+                        <div class="model-name">${model.name}</div>
+                        <div class="model-provider">by ${model.provider} • ${model.id}</div>
+                    </div>
+                    
+                    <div class="model-section">
+                        <h4>Best For</h4>
+                        <div class="tag-list">
+                            ${model.best_for.map(item => `<span class="tag">${item}</span>`).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="model-section">
+                        <h4>Strengths</h4>
+                        <div class="tag-list">
+                            ${model.strengths.map(item => `<span class="tag strength">✓ ${item}</span>`).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="model-section">
+                        <h4>Limitations</h4>
+                        <div class="tag-list">
+                            ${model.limitations.map(item => `<span class="tag limitation">! ${item}</span>`).join('')}
+                        </div>
+                    </div>
+                    
+                    <div class="model-section">
+                        <h4>Use Cases</h4>
+                        <ul class="text-list">
+                            ${model.use_cases.map(useCase => `<li>${useCase}</li>`).join('')}
+                        </ul>
+                    </div>
+                    
+                    <div class="model-specs">
+                        <div class="spec-item">
+                            <div class="spec-label">Output</div>
+                            <div class="spec-value">${model.output_specs}</div>
+                        </div>
+                        <div class="spec-item">
+                            <div class="spec-label">Pricing</div>
+                            <div class="spec-value">${model.estimated_cost}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Load models on page load
+        loadModels();
     </script>
 </body>
 </html>

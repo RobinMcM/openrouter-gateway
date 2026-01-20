@@ -85,3 +85,15 @@ class ExecuteResponse(BaseModel):
     routing: Dict[str, str]
     result: Optional[Dict[str, Any]] = None  # OpenRouter response if executed
     usage: Dict[str, Any]  # actual or estimated usage/cost
+
+
+# Models listing schemas
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    provider: Optional[str] = None
+
+
+class ModelsResponse(BaseModel):
+    status: str = "ok"
+    models: List[ModelInfo]

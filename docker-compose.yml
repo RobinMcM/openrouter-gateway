@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  gateway:
+    build: .
+    container_name: openrouter-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-placeholder}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - ADMIN_MARKUP_PERCENT=${ADMIN_MARKUP_PERCENT:-0.10}
+      - ADMIN_FIXED_FEE=${ADMIN_FIXED_FEE:-0.001}
+    volumes:
+      - openrouter-config:/app/config
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  openrouter-config:
+    driver: local

@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
+from pydantic import field_validator
 
 
 # Request/Response schemas for routing endpoint
@@ -97,3 +98,24 @@ class ModelInfo(BaseModel):
 class ModelsResponse(BaseModel):
     status: str = "ok"
     models: List[ModelInfo]
+
+
+# Configuration management schemas
+class UpdateOpenRouterKeyRequest(BaseModel):
+    api_key: str = Field(..., min_length=10, description="OpenRouter API key (sk-or-v1-...)")
+
+
+class TestOpenRouterKeyRequest(BaseModel):
+    api_key: str = Field(..., min_length=10, description="OpenRouter API key to test")
+
+
+class TestOpenRouterKeyResponse(BaseModel):
+    status: str
+    valid: bool
+    message: str
+
+
+class OpenRouterKeyStatusResponse(BaseModel):
+    status: str = "ok"
+    configured: bool
+    message: str

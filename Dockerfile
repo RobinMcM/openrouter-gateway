@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app/ ./app/
 
+# Create config directory with proper permissions
+RUN mkdir -p /app/config && chmod 700 /app/config
+
 # Expose port
 EXPOSE 8000
 

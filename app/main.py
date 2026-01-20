@@ -7,7 +7,8 @@ from app.schemas import (
     ErrorResponse, InstructionsResponse, EndpointInfo, LogsResponse,
     ModelsResponse, ModelInfo,
     UpdateOpenRouterKeyRequest, TestOpenRouterKeyRequest,
-    TestOpenRouterKeyResponse, OpenRouterKeyStatusResponse
+    TestOpenRouterKeyResponse, OpenRouterKeyStatusResponse,
+    SuccessResponse
 )
 from app.models_data import OPENROUTER_MODELS
 from app.config_manager import (

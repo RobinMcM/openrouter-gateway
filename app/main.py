@@ -205,13 +205,17 @@ async def get_models(api_key: str = Depends(verify_api_key)):
         
         log_success(job_id, f"total={grouped['total']} filtered={grouped['filtered']} popular={len(grouped['popular'])}")
         
-        # Return grouped models
+        # Return grouped models with backward compatibility
+        all_models = grouped["popular"] + grouped["other"]
+        
         return {
             "status": "ok",
+            "models": all_models,  # Backward compatibility - all models in one list
             "popular": grouped["popular"],
             "other": grouped["other"],
             "total": grouped["total"],
-            "filtered": grouped["filtered"]
+            "filtered": grouped["filtered"],
+            "count": len(all_models)  # Backward compatibility
         }
     
     except Exception as e:

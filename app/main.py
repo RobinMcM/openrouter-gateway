@@ -178,15 +178,37 @@ async def get_logs(
     return LogsResponse(lines=len(logs), logs=logs)
 
 
-@app.get("/api/models", response_model=ModelsResponse)
+@app.get("/api/models")
 async def get_models(api_key: str = Depends(verify_api_key)):
     """
     Get list of available OpenRouter models.
-    Returns a static list of popular models with basic information.
-    No external API calls - data is hardcoded from OpenRouter's public website.
+    Fetches real-time model list from OpenRouter API.
+    Returns all available models with their capabilities and pricing.
     """
-    models = [ModelInfo(**model) for model in OPENROUTER_MODELS]
-    return ModelsResponse(models=models)
+    from app.openrouter_client import fetch_openrouter_models
+    
+    job_id = str(uuid.uuid4())
+    log_request("models", job_id)
+    
+    try:
+        success, models_data, error_msg = await fetch_openrouter_models()
+        
+        if not success:
+            log_error(job_id, error_msg or "Failed to fetch models")
+            return ErrorResponse(message=error_msg or "Failed to fetch models from OpenRouter")
+        
+        log_success(job_id, f"models_count={len(models_data.get('data', []))}")
+        
+        # Return the raw OpenRouter response which includes all model details
+        return {
+            "status": "ok",
+            "models": models_data.get("data", []),
+            "count": len(models_data.get("data", []))
+        }
+    
+    except Exception as e:
+        log_error(job_id, str(e))
+        return ErrorResponse(message=f"Unexpected error: {str(e)}")
 
 
 @app.get("/api/models-showcase", response_model=ModelsShowcaseResponse)

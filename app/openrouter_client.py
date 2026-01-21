@@ -184,6 +184,40 @@ async def call_openrouter(
         return False, None, f"Unexpected error calling OpenRouter: {str(e)}"
 
 
+async def fetch_openrouter_models() -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Fetch list of available models from OpenRouter API.
+    
+    Returns:
+        (success, models_data, error_message)
+    
+    Note: NEVER logs Authorization header or API key
+    """
+    url = f"{OPENROUTER_BASE_URL}/models"
+    
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return True, response.json(), None
+            else:
+                error_msg = f"OpenRouter API error: {response.status_code} - {response.text[:500]}"
+                return False, None, error_msg
+    
+    except httpx.TimeoutException:
+        return False, None, "OpenRouter API request timed out"
+    except httpx.RequestError as e:
+        return False, None, f"OpenRouter API request failed: {str(e)}"
+    except Exception as e:
+        return False, None, f"Unexpected error fetching models: {str(e)}"
+
+
 def extract_actual_usage(
     response: Dict[str, Any],
     routing: Dict[str, str]

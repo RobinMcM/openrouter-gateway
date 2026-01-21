@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 import uuid
 from app.auth import verify_api_key
@@ -23,6 +24,16 @@ from app.openrouter_client import (
 )
 
 app = FastAPI(title="OpenRouter Gateway", version="1.0.0")
+
+# Configure CORS to allow requests from development and production frontends
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (can be restricted in production)
+    allow_credentials=False,  # Must be False when allow_origins is "*"
+    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, OPTIONS, etc.)
+    allow_headers=["*"],  # Allow all headers including X-API-Key
+    expose_headers=["*"],  # Expose all headers to the browser
+)
 
 
 @app.get("/health")

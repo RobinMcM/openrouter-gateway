@@ -218,6 +218,83 @@ async def fetch_openrouter_models() -> Tuple[bool, Optional[Dict[str, Any]], Opt
         return False, None, f"Unexpected error fetching models: {str(e)}"
 
 
+def filter_and_group_models(models_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Filter out unavailable/experimental models and group into popular vs other.
+    
+    Top 10 popular models listed first, then remaining models alphabetically.
+    
+    Args:
+        models_data: Raw response from OpenRouter /models endpoint
+        
+    Returns:
+        Grouped models: {popular: [], other: [], total: int, filtered: int}
+    """
+    all_models = models_data.get("data", [])
+    
+    # Define top 10 most popular models (in order of popularity)
+    popular_model_ids = [
+        "openai/gpt-4-turbo",
+        "openai/gpt-4",
+        "anthropic/claude-3-opus",
+        "anthropic/claude-3-sonnet",
+        "openai/gpt-3.5-turbo",
+        "google/gemini-pro",
+        "anthropic/claude-3-haiku",
+        "meta-llama/llama-3-70b-instruct",
+        "mistralai/mixtral-8x7b-instruct",
+        "cohere/command-r-plus"
+    ]
+    
+    # Filter models: exclude experimental, beta, and unavailable
+    filtered_models = []
+    for model in all_models:
+        model_id = model.get("id", "")
+        model_name = model.get("name", "")
+        
+        # Skip if model has beta/experimental indicators
+        if any(x in model_id.lower() for x in ["beta", "experimental", "preview", "test"]):
+            continue
+        if any(x in model_name.lower() for x in ["beta", "experimental", "preview", "test"]):
+            continue
+            
+        # Skip if explicitly marked as unavailable
+        # (OpenRouter doesn't always have this field, so we check safely)
+        if not model.get("context_length", 0) > 0:
+            continue
+            
+        filtered_models.append(model)
+    
+    # Separate into popular and other
+    popular = []
+    other = []
+    
+    for model in filtered_models:
+        model_id = model.get("id", "")
+        if model_id in popular_model_ids:
+            popular.append(model)
+        else:
+            other.append(model)
+    
+    # Sort popular by the predefined order
+    popular_sorted = []
+    for popular_id in popular_model_ids:
+        for model in popular:
+            if model.get("id") == popular_id:
+                popular_sorted.append(model)
+                break
+    
+    # Sort other alphabetically by name
+    other_sorted = sorted(other, key=lambda m: m.get("name", "").lower())
+    
+    return {
+        "popular": popular_sorted,
+        "other": other_sorted,
+        "total": len(all_models),
+        "filtered": len(filtered_models)
+    }
+
+
 def extract_actual_usage(
     response: Dict[str, Any],
     routing: Dict[str, str]

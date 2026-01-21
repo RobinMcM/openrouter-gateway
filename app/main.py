@@ -183,9 +183,12 @@ async def get_models(api_key: str = Depends(verify_api_key)):
     """
     Get list of available OpenRouter models.
     Fetches real-time model list from OpenRouter API.
-    Returns all available models with their capabilities and pricing.
+    Returns filtered models grouped into:
+    - popular: Top 10 most popular models
+    - other: All other models (alphabetically sorted)
+    Excludes experimental, beta, and unavailable models.
     """
-    from app.openrouter_client import fetch_openrouter_models
+    from app.openrouter_client import fetch_openrouter_models, filter_and_group_models
     
     job_id = str(uuid.uuid4())
     log_request("models", job_id)
@@ -197,13 +200,18 @@ async def get_models(api_key: str = Depends(verify_api_key)):
             log_error(job_id, error_msg or "Failed to fetch models")
             return ErrorResponse(message=error_msg or "Failed to fetch models from OpenRouter")
         
-        log_success(job_id, f"models_count={len(models_data.get('data', []))}")
+        # Filter and group models
+        grouped = filter_and_group_models(models_data)
         
-        # Return the raw OpenRouter response which includes all model details
+        log_success(job_id, f"total={grouped['total']} filtered={grouped['filtered']} popular={len(grouped['popular'])}")
+        
+        # Return grouped models
         return {
             "status": "ok",
-            "models": models_data.get("data", []),
-            "count": len(models_data.get("data", []))
+            "popular": grouped["popular"],
+            "other": grouped["other"],
+            "total": grouped["total"],
+            "filtered": grouped["filtered"]
         }
     
     except Exception as e:

@@ -80,6 +80,7 @@ def calculate_cost_estimate(
         estimate.update({
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
             "input_cost": round(input_cost, 6),
             "output_cost": round(output_cost, 6),
             "subtotal": round(input_cost + output_cost, 6)
@@ -137,7 +138,8 @@ def calculate_cost_estimate(
     
     estimate.update({
         "admin_total": round(admin_markup_amount, 6),
-        "total": round(total, 6)
+        "total": round(total, 6),
+        "total_cost": round(total, 6)
     })
     
     return estimate
@@ -340,6 +342,7 @@ def extract_actual_usage(
         result.update({
             "input_tokens": prompt_tokens,
             "output_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
             "input_cost": round(input_cost, 6),
             "output_cost": round(output_cost, 6),
             "subtotal": round(subtotal, 6)
@@ -359,7 +362,8 @@ def extract_actual_usage(
         "admin_markup_percent": ADMIN_MARKUP_PERCENT,
         "admin_markup_fixed": ADMIN_FIXED_FEE,
         "admin_total": round(admin_total, 6),
-        "total": round(total, 6)
+        "total": round(total, 6),
+        "total_cost": round(total, 6)
     })
     
     return result

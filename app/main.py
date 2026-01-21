@@ -1669,6 +1669,14 @@ async def execute_request(
         
         routing = ROUTING_CONFIG[job_type]
         
+        # Override routing with actual model from payload
+        if "model" in request.payload:
+            routing = routing.copy()  # Don't mutate the global config
+            routing["model"] = request.payload["model"]
+            # Extract provider from model (e.g., "openai/gpt-4" -> "openai")
+            if "/" in routing["model"]:
+                routing["provider"] = routing["model"].split("/")[0]
+        
         # Dry run - return estimate only
         if request.dry_run:
             estimate = calculate_cost_estimate(routing, request.payload)

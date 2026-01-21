@@ -335,9 +335,24 @@ def extract_actual_usage(
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
         
-        input_cost = (prompt_tokens / 1000) * pricing.get("input_cost_per_1k", 0)
-        output_cost = (completion_tokens / 1000) * pricing.get("output_cost_per_1k", 0)
-        subtotal = input_cost + output_cost
+        # CRITICAL: Use OpenRouter's actual cost if provided
+        if "cost" in usage:
+            # OpenRouter provides the actual cost - use it!
+            subtotal = usage.get("cost", 0)
+            # Break down costs proportionally based on token ratio
+            if prompt_tokens + completion_tokens > 0:
+                input_ratio = prompt_tokens / (prompt_tokens + completion_tokens)
+                output_ratio = completion_tokens / (prompt_tokens + completion_tokens)
+                input_cost = subtotal * input_ratio
+                output_cost = subtotal * output_ratio
+            else:
+                input_cost = 0
+                output_cost = 0
+        else:
+            # Fallback: Calculate from pricing config if OpenRouter didn't provide cost
+            input_cost = (prompt_tokens / 1000) * pricing.get("input_cost_per_1k", 0)
+            output_cost = (completion_tokens / 1000) * pricing.get("output_cost_per_1k", 0)
+            subtotal = input_cost + output_cost
         
         result.update({
             "input_tokens": prompt_tokens,

@@ -32,10 +32,10 @@ MEDIA_ROUTING_CONFIG: Dict[str, Dict[str, Any]] = {
         "description": "Convert image to video with Kling"
     },
     "video-generation": {
-        "model": "fal-ai/runway-gen3/turbo/image-to-video",
+        "model": "fal-ai/luma-dream-machine/ray-2-flash",
         "mode": "queue",
         "timeout": 180,
-        "description": "Generate video from image with Runway Gen-3"
+        "description": "Generate video from text with Luma Ray 2 Flash"
     },
     "audio-generation": {
         "model": "fal-ai/stable-audio",
@@ -60,6 +60,8 @@ ALLOWED_MODELS = {
     "fal-ai/kling-video/v1/standard/text-to-video",
     "fal-ai/runway-gen3/turbo/image-to-video",
     "fal-ai/luma-dream-machine",
+    "fal-ai/luma-dream-machine/ray-2",
+    "fal-ai/luma-dream-machine/ray-2-flash",
     
     # Audio models
     "fal-ai/stable-audio",

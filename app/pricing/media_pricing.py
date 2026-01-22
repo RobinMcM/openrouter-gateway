@@ -72,6 +72,18 @@ MEDIA_PRICING_CONFIG: Dict[str, Dict[str, Any]] = {
         "default_duration": 5,
         "description": "Luma Dream Machine"
     },
+    "fal-ai/luma-dream-machine/ray-2": {
+        "strategy": "per_second",
+        "cost_per_second": 0.07,
+        "default_duration": 5,
+        "description": "Luma Ray 2 (high quality)"
+    },
+    "fal-ai/luma-dream-machine/ray-2-flash": {
+        "strategy": "per_second",
+        "cost_per_second": 0.05,
+        "default_duration": 5,
+        "description": "Luma Ray 2 Flash (faster)"
+    },
     
     # Audio models - per generation (flat rate)
     "fal-ai/stable-audio": {

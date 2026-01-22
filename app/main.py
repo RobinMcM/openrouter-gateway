@@ -1,14 +1,15 @@
 from fastapi import FastAPI, Depends
 from fastapi.responses import HTMLResponse
 import uuid
-from app.auth import verify_api_key
+from app.auth import verify_api_key, verify_admin_key
 from app.schemas import (
     RouteRequest, RouteResponse, ExecuteRequest, ExecuteResponse,
     ErrorResponse, InstructionsResponse, EndpointInfo, LogsResponse,
     ModelsResponse, ModelInfo,
     UpdateOpenRouterKeyRequest, TestOpenRouterKeyRequest,
     TestOpenRouterKeyResponse, OpenRouterKeyStatusResponse,
-    SuccessResponse, ModelsShowcaseResponse, ShowcaseCategory, ShowcaseModel
+    SuccessResponse, ModelsShowcaseResponse, ShowcaseCategory, ShowcaseModel,
+    OpenRouterExecuteRequest, FalExecuteRequest, AsyncJobResponse, JobStatusResponse
 )
 from app.models_data import OPENROUTER_MODELS
 from app.movieshaker_models_data import MOVIESHAKER_MODELS, CATEGORIES
@@ -18,9 +19,15 @@ from app.config_manager import (
 )
 from app.logger import get_sanitized_logs, log_request, log_success, log_error
 from app.config import ROUTING_CONFIG
-from app.openrouter_client import (
+from app.providers.openrouter_client import (
     calculate_cost_estimate, call_openrouter, extract_actual_usage
 )
+# FAL gateway imports
+from app.providers import fal_client
+from app.routing.media_routing import get_routing_for_media_type, is_model_allowed
+from app.pricing.media_pricing import calculate_cost_estimate as calculate_media_cost
+from app.pricing.media_pricing import extract_actual_usage as extract_media_usage
+from app.job_store.valkey_store import get_valkey_store
 
 app = FastAPI(title="OpenRouter Gateway", version="1.0.0")
 
@@ -151,12 +158,14 @@ async def get_instructions(api_key: str = Depends(verify_api_key)):
 @app.get("/api/logs", response_model=LogsResponse)
 async def get_logs(
     lines: int = 200,
-    api_key: str = Depends(verify_api_key)
+    api_key: str = Depends(verify_admin_key)  # Correction #10: Admin-only
 ):
     """
-    Get recent operational logs for debugging.
+    Get recent operational logs for debugging (ADMIN ONLY).
     Returns the last N lines from the log file (default 200, max 1000).
     All sensitive data is redacted before returning.
+    
+    Correction #10: Requires ADMIN_API_KEY if set, otherwise INTERNAL_API_KEY.
     """
     # Validate and cap lines parameter
     if lines > 1000:
@@ -1637,22 +1646,35 @@ async def route_request(
         return ErrorResponse(message=f"Unexpected error: {str(e)}")
 
 
-@app.post("/api/execute", response_model=ExecuteResponse | ErrorResponse)
+@app.post("/api/execute")
 async def execute_request(
     request: ExecuteRequest,
     api_key: str = Depends(verify_api_key)
 ):
     """
-    Execute OpenRouter API call or dry-run with cost tracking.
+    Execute API call with provider routing (OpenRouter or FAL).
     
-    If dry_run=true: Returns routing + estimate only (no OpenRouter call)
-    If dry_run=false: Makes actual OpenRouter API call and returns result + usage
+    Discriminated union on 'provider' field routes to appropriate handler.
+    - provider=openrouter: Sync execution, returns immediately
+    - provider=fal: Async execution, returns job_id for polling
+    """
+    # Pydantic discriminated union automatically routes based on provider
+    if isinstance(request, OpenRouterExecuteRequest):
+        return await execute_openrouter(request)
+    elif isinstance(request, FalExecuteRequest):
+        return await execute_fal(request)
+    else:
+        return ErrorResponse(message="Unknown provider")
+
+
+async def execute_openrouter(request: OpenRouterExecuteRequest) -> ExecuteResponse | ErrorResponse:
+    """
+    Handle OpenRouter execution (existing logic).
     """
     job_id = str(uuid.uuid4())
-    log_request("execute", job_id)
+    log_request("execute_openrouter", job_id)
     
     try:
-        # Look up routing for job_type
         job_type = request.job_type
         
         if job_type not in ROUTING_CONFIG:
@@ -1663,9 +1685,8 @@ async def execute_request(
         
         # Override routing with actual model from payload
         if "model" in request.payload:
-            routing = routing.copy()  # Don't mutate the global config
+            routing = routing.copy()
             routing["model"] = request.payload["model"]
-            # Extract provider from model (e.g., "openai/gpt-4" -> "openai")
             if "/" in routing["model"]:
                 routing["provider"] = routing["model"].split("/")[0]
         
@@ -1688,10 +1709,8 @@ async def execute_request(
             log_error(job_id, error_msg or "Unknown error")
             return ErrorResponse(message=error_msg or "OpenRouter API call failed")
         
-        # Extract actual usage from response
         usage = extract_actual_usage(response_data, routing)
-        
-        log_success(job_id, f"job_type={job_type} model={routing.get('model')} estimated={usage.get('estimated', True)}")
+        log_success(job_id, f"job_type={job_type} model={routing.get('model')}")
         
         return ExecuteResponse(
             routing=routing,
@@ -1701,4 +1720,235 @@ async def execute_request(
     
     except Exception as e:
         log_error(job_id, str(e))
+        return ErrorResponse(message=f"Unexpected error: {str(e)}")
+
+
+async def execute_fal(request: FalExecuteRequest) -> AsyncJobResponse | ErrorResponse:
+    """
+    Handle FAL execution (async with job queue).
+    Returns job_id immediately, client polls /api/status/{job_id}.
+    """
+    job_id = str(uuid.uuid4())
+    log_request("execute_fal", job_id)
+    
+    try:
+        # Get routing for media_type with optional model override (Correction #9)
+        routing_config = get_routing_for_media_type(request.media_type, request.model)
+        
+        if not routing_config:
+            if request.model and not is_model_allowed(request.model):
+                log_error(job_id, f"Model not allowed: {request.model}")
+                return ErrorResponse(message=f"Model '{request.model}' not in allowlist")
+            log_error(job_id, f"Unknown media_type: {request.media_type}")
+            return ErrorResponse(message=f"Unknown media_type: {request.media_type}")
+        
+        model = routing_config["model"]
+        mode = routing_config.get("mode", "queue")
+        
+        # Calculate cost estimate
+        estimate = calculate_media_cost(model, request.payload)
+        
+        # Dry run - return estimate only
+        if request.dry_run:
+            log_success(job_id, f"dry_run=true media_type={request.media_type} model={model}")
+            return AsyncJobResponse(
+                ok=True,
+                job_id=job_id,
+                job_status="completed",
+                status_url=f"/api/status/{job_id}",
+                estimate=estimate
+            )
+        
+        # Create job in Valkey
+        valkey = await get_valkey_store()
+        await valkey.create_job(
+            job_id=job_id,
+            provider="fal",
+            media_type=request.media_type,
+            model=model,
+            payload=request.payload,
+            estimate=estimate
+        )
+        
+        # Submit to FAL (queue mode)
+        success, provider_request_id, error_msg = await fal_client.submit_queue(
+            model_id=model,
+            payload=request.payload,
+            webhook_url=request.webhook_url
+        )
+        
+        if not success:
+            await valkey.update_job(job_id, status="failed", error=error_msg)
+            log_error(job_id, error_msg or "FAL submission failed")
+            return ErrorResponse(message=error_msg or "FAL submission failed")
+        
+        # Update job with provider request ID
+        await valkey.update_job(
+            job_id,
+            status="processing",
+            provider_request_id=provider_request_id
+        )
+        
+        log_success(job_id, f"media_type={request.media_type} model={model} provider_request_id={provider_request_id}")
+        
+        return AsyncJobResponse(
+            ok=True,
+            job_id=job_id,
+            job_status="processing",
+            status_url=f"/api/status/{job_id}",
+            estimate=estimate
+        )
+    
+    except Exception as e:
+        log_error(job_id, str(e))
+        return ErrorResponse(message=f"Unexpected error: {str(e)}")
+
+
+@app.get("/api/status/{job_id}", response_model=JobStatusResponse | ErrorResponse)
+async def get_job_status(
+    job_id: str,
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    Get status of FAL job.
+    
+    Correction #4: Transient errors don't fail the job, only terminal states do.
+    
+    Returns:
+    - queued: Job submitted but not started
+    - processing: Job in progress
+    - completed: Job done, result available
+    - failed: Job failed (terminal error only)
+    """
+    log_request("status", job_id)
+    
+    try:
+        valkey = await get_valkey_store()
+        job = await valkey.get_job(job_id)
+        
+        if not job:
+            log_error(job_id, "Job not found")
+            return ErrorResponse(message=f"Job {job_id} not found")
+        
+        current_status = job.get("status")
+        
+        # If already completed or failed, return cached result
+        if current_status in ["completed", "failed"]:
+            log_success(job_id, f"status={current_status} (cached)")
+            
+            return JobStatusResponse(
+                ok=(current_status == "completed"),
+                job_id=job_id,
+                job_status=current_status,
+                result=job.get("result"),
+                usage=job.get("estimate"),  # Or actual usage if available
+                error=job.get("error")
+            )
+        
+        # Job still processing - check FAL status
+        # Correction #3: Acquire lock to prevent concurrent status checks
+        lock_acquired = await valkey.acquire_lock(job_id, timeout_seconds=10)
+        
+        if not lock_acquired:
+            # Another request is checking status, return current state
+            log_success(job_id, f"status={current_status} (locked)")
+            return JobStatusResponse(
+                ok=True,
+                job_id=job_id,
+                job_status=current_status,
+                provider_status=None,
+                warning="Status check in progress by another request"
+            )
+        
+        # Check FAL status
+        provider_request_id = job.get("provider_request_id")
+        model = job.get("model")
+        
+        if not provider_request_id or not model:
+            log_error(job_id, "Missing provider_request_id or model")
+            return ErrorResponse(message="Invalid job state")
+        
+        # Correction #4: Transient errors should not fail the job
+        success, status_data, error_msg = await fal_client.get_queue_status(model, provider_request_id)
+        
+        if not success:
+            # Transient error - keep job as processing, return warning
+            log_error(job_id, f"Transient status error: {error_msg}")
+            return JobStatusResponse(
+                ok=True,
+                job_id=job_id,
+                job_status="processing",
+                provider_status=None,
+                warning=f"Transient error checking status: {error_msg}"
+            )
+        
+        fal_status = status_data.get("status", "UNKNOWN")
+        
+        # Job still queued or in progress
+        if fal_status in ["IN_QUEUE", "IN_PROGRESS"]:
+            log_success(job_id, f"fal_status={fal_status}")
+            return JobStatusResponse(
+                ok=True,
+                job_id=job_id,
+                job_status="processing",
+                provider_status=status_data
+            )
+        
+        # Job completed - fetch result
+        if fal_status == "COMPLETED":
+            response_url = status_data.get("response_url")
+            
+            if not response_url:
+                log_error(job_id, "No response_url in completed status")
+                await valkey.update_job(job_id, status="failed", error="No response_url from FAL")
+                return ErrorResponse(message="FAL returned COMPLETED but no response_url")
+            
+            # Fetch result (Correction #5: validates host and includes auth)
+            success, result_data, error_msg = await fal_client.fetch_queue_result(response_url)
+            
+            if not success:
+                log_error(job_id, f"Failed to fetch result: {error_msg}")
+                await valkey.update_job(job_id, status="failed", error=error_msg)
+                return ErrorResponse(message=f"Failed to fetch result: {error_msg}")
+            
+            # Parse result (Correction #8: handles multiple formats)
+            parsed_result = fal_client.parse_fal_result(result_data)
+            
+            # Calculate actual usage
+            payload = job.get("payload", {})
+            usage = extract_media_usage(result_data, model, payload)
+            
+            # Store result in Valkey
+            await valkey.update_job(
+                job_id,
+                status="completed",
+                result_json=parsed_result,
+                estimate_json=usage
+            )
+            
+            log_success(job_id, f"status=completed files={len(parsed_result.get('files', []))}")
+            
+            return JobStatusResponse(
+                ok=True,
+                job_id=job_id,
+                job_status="completed",
+                result=parsed_result,
+                usage=usage
+            )
+        
+        # Job failed (terminal failure from FAL)
+        else:
+            error_detail = status_data.get("error", f"FAL status: {fal_status}")
+            await valkey.update_job(job_id, status="failed", error=error_detail)
+            log_error(job_id, f"FAL job failed: {error_detail}")
+            
+            return JobStatusResponse(
+                ok=False,
+                job_id=job_id,
+                job_status="failed",
+                error=error_detail
+            )
+    
+    except Exception as e:
+        log_error(job_id, f"Unexpected error: {str(e)}")
         return ErrorResponse(message=f"Unexpected error: {str(e)}")

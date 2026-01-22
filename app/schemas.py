@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union, Literal, Annotated
 
 
 # Request/Response schemas for routing endpoint
@@ -14,18 +14,47 @@ class RouteResponse(BaseModel):
     estimate: dict  # cost breakdown
 
 
-# Request/response schemas for execute endpoint
-class ExecuteRequest(BaseModel):
+# Request/response schemas for execute endpoint (with provider discriminator)
+class BaseExecuteRequest(BaseModel):
+    """Base class with provider discriminator"""
+    provider: str
+
+class OpenRouterExecuteRequest(BaseExecuteRequest):
+    """OpenRouter-specific execute request"""
+    provider: Literal["openrouter"] = "openrouter"
     job_type: str
-    payload: dict  # OpenRouter API payload
+    payload: Dict[str, Any]
     dry_run: bool = False
 
+class FalExecuteRequest(BaseExecuteRequest):
+    """FAL.ai-specific execute request"""
+    provider: Literal["fal"] = "fal"
+    media_type: str  # "image-generation", "video-generation", etc.
+    model: Optional[str] = None  # Override default model for media_type
+    payload: Dict[str, Any]
+    dry_run: bool = False
+    webhook_url: Optional[str] = None  # For async notifications
+
+# Discriminated union - Pydantic will route based on provider field
+ExecuteRequest = Annotated[
+    Union[OpenRouterExecuteRequest, FalExecuteRequest],
+    Field(discriminator="provider")
+]
 
 class ExecuteResponse(BaseModel):
+    """Immediate response for sync execution (OpenRouter)"""
     status: str = "ok"
     routing: dict
     result: Optional[dict] = None  # OpenRouter response if executed
     usage: dict  # actual or estimated usage/cost
+
+class AsyncJobResponse(BaseModel):
+    """Response for async job submission (FAL)"""
+    ok: bool = True
+    job_id: str
+    job_status: Literal["queued", "processing", "completed", "failed"]
+    status_url: str
+    estimate: Dict[str, Any]  # Cost estimate
 
 
 # Standard response schemas matching ffmpeg-api pattern
@@ -143,3 +172,16 @@ class ShowcaseCategory(BaseModel):
 class ModelsShowcaseResponse(BaseModel):
     status: str = "ok"
     categories: Dict[str, ShowcaseCategory]
+
+
+# FAL job status schemas
+class JobStatusResponse(BaseModel):
+    """Response for /api/status/{job_id}"""
+    ok: bool
+    job_id: str
+    job_status: Literal["queued", "processing", "completed", "failed"]
+    provider_status: Optional[Dict[str, Any]] = None  # Raw provider status
+    result: Optional[Dict[str, Any]] = None  # Files, metadata when completed
+    usage: Optional[Dict[str, Any]] = None  # Cost info when completed
+    error: Optional[str] = None  # Error message when failed
+    warning: Optional[str] = None  # Transient errors

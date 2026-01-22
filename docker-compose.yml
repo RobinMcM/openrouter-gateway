@@ -7,10 +7,18 @@ services:
       - "8000"  # Internal only, not published externally
     environment:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}  # Optional admin key for /api/logs
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-placeholder}
       - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       - ADMIN_MARKUP_PERCENT=${ADMIN_MARKUP_PERCENT:-0.10}
       - ADMIN_FIXED_FEE=${ADMIN_FIXED_FEE:-0.001}
+      # FAL.ai configuration
+      - FAL_KEY=${FAL_KEY:-}
+      - FAL_SYNC_BASE=${FAL_SYNC_BASE:-https://fal.run}
+      - FAL_QUEUE_BASE=${FAL_QUEUE_BASE:-https://queue.fal.run}
+      # Valkey configuration
+      - VALKEY_URL=redis://valkey:6379/0
+      - JOB_TTL_SECONDS=${JOB_TTL_SECONDS:-3600}
     volumes:
       - openrouter-config:/app/config
     healthcheck:
@@ -19,6 +27,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    depends_on:
+      - valkey
+    networks:
+      - gateway-network
+  
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    container_name: valkey-gateway
+    restart: unless-stopped
+    expose:
+      - "6379"  # Internal only
+    volumes:
+      - valkey-data:/data
+    command: valkey-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     networks:
       - gateway-network
 
@@ -49,6 +76,8 @@ services:
 
 volumes:
   openrouter-config:
+    driver: local
+  valkey-data:
     driver: local
 
 networks:

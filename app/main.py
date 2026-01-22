@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.responses import HTMLResponse
 import uuid
 from app.auth import verify_api_key, verify_admin_key
@@ -1648,23 +1648,35 @@ async def route_request(
 
 @app.post("/api/execute")
 async def execute_request(
-    request: ExecuteRequest,
+    request: Request,  # Use FastAPI Request object
     api_key: str = Depends(verify_api_key)
 ):
     """
     Execute API call with provider routing (OpenRouter or FAL).
     
-    Discriminated union on 'provider' field routes to appropriate handler.
-    - provider=openrouter: Sync execution, returns immediately
-    - provider=fal: Async execution, returns job_id for polling
+    Supports both:
+    - New format: discriminated union on 'provider' field
+    - Old format: no provider field (defaults to OpenRouter)
     """
-    # Pydantic discriminated union automatically routes based on provider
-    if isinstance(request, OpenRouterExecuteRequest):
-        return await execute_openrouter(request)
-    elif isinstance(request, FalExecuteRequest):
-        return await execute_fal(request)
+    # Get the raw JSON body
+    body = await request.json()
+    
+    # Check if provider field exists, default to openrouter for backward compatibility
+    if "provider" not in body:
+        body["provider"] = "openrouter"
+    
+    provider = body["provider"]
+    
+    if provider == "openrouter":
+        # Parse as OpenRouterExecuteRequest
+        openrouter_request = OpenRouterExecuteRequest(**body)
+        return await execute_openrouter(openrouter_request)
+    elif provider == "fal":
+        # Parse as FalExecuteRequest
+        fal_request = FalExecuteRequest(**body)
+        return await execute_fal(fal_request)
     else:
-        return ErrorResponse(message="Unknown provider")
+        return ErrorResponse(message=f"Unknown provider: {provider}")
 
 
 async def execute_openrouter(request: OpenRouterExecuteRequest) -> ExecuteResponse | ErrorResponse:

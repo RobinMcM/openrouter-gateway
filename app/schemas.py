@@ -103,17 +103,19 @@ class RouteResponse(BaseModel):
     estimate: Dict[str, Any]
 
 
-class ExecuteRequest(BaseModel):
-    job_type: str
-    payload: Dict[str, Any]  # OpenRouter API payload
-    dry_run: bool = False
+# OLD ExecuteRequest class removed - now using discriminated union above (line 39)
+# class ExecuteRequest(BaseModel):
+#     job_type: str
+#     payload: Dict[str, Any]  # OpenRouter API payload
+#     dry_run: bool = False
 
 
-class ExecuteResponse(BaseModel):
-    status: str = "ok"
-    routing: Dict[str, str]
-    result: Optional[Dict[str, Any]] = None  # OpenRouter response if executed
-    usage: Dict[str, Any]  # actual or estimated usage/cost
+# OLD ExecuteResponse class removed - now using ExecuteResponse/AsyncJobResponse above
+# class ExecuteResponse(BaseModel):
+#     status: str = "ok"
+#     routing: Dict[str, str]
+#     result: Optional[Dict[str, Any]] = None  # OpenRouter response if executed
+#     usage: Dict[str, Any]  # actual or estimated usage/cost
 
 
 # Models listing schemas

@@ -2,6 +2,14 @@
 
 This document describes the FAL.ai media generation integration added to the OpenRouter Gateway.
 
+## Client API reference (authoritative)
+
+**To implement a client** (e.g. testopenrouter, MovieShaker, or any new app), use the full specification:
+
+- **[docs/FAL_MEDIA_API.md](docs/FAL_MEDIA_API.md)** – Request/response shapes, authentication, step-by-step client flow, cURL examples, and troubleshooting.
+
+The testopenrouter app is a reference client that validates this API; the doc above is the single source of truth for building API calls.
+
 ## Overview
 
 The gateway now supports **two providers**:

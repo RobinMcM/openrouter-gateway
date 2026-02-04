@@ -1881,7 +1881,9 @@ async def get_job_status(
             return ErrorResponse(message="Invalid job state")
         
         # Correction #4: Transient errors should not fail the job
-        success, status_data, error_msg = await fal_client.get_queue_status(model, provider_request_id)
+        success, status_data, error_msg = await fal_client.get_queue_status(
+            model, provider_request_id, job_id=job_id
+        )
         
         if not success:
             # Transient error - keep job as processing, return warning

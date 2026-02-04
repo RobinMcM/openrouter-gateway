@@ -5,6 +5,7 @@ Implements fal.ai API integration with:
 - Correction #5: Auth headers + host allowlist for response URLs
 - Correction #8: Robust result parsing for various output formats
 - Support for sync and queue endpoints
+- FAL queue status/result: use base model path (no subpath) per fal.ai docs
 """
 
 import os
@@ -12,6 +13,26 @@ import httpx
 from typing import Dict, Any, Tuple, Optional, List
 from urllib.parse import urlparse
 from app.logger import log_error, log_success
+
+
+def model_id_for_queue_status(model_id: str) -> str:
+    """
+    Return the model_id to use for FAL queue status and result endpoints.
+
+    Per fal.ai Queue API docs: "The subpath should be used when making the
+    request, but not when getting request status or results." So we use the
+    first two path segments (e.g. fal-ai/flux) for status/result, while
+    submit uses the full model_id (e.g. fal-ai/flux/schnell).
+
+    Examples:
+        fal-ai/flux/schnell -> fal-ai/flux
+        fal-ai/luma-dream-machine/ray-2-flash -> fal-ai/luma-dream-machine
+        fal-ai/flux-pro -> fal-ai/flux-pro (unchanged)
+    """
+    parts = model_id.strip().split("/")
+    if len(parts) <= 2:
+        return model_id
+    return "/".join(parts[:2])
 
 
 # Environment configuration
@@ -103,17 +124,26 @@ async def submit_queue(model_id: str, payload: Dict[str, Any], webhook_url: Opti
         return False, None, f"Unexpected error submitting to fal.ai queue: {str(e)}"
 
 
-async def get_queue_status(model_id: str, request_id: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+async def get_queue_status(
+    model_id: str,
+    request_id: str,
+    job_id: Optional[str] = None,
+) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
     """
     Check status of queued job.
-    
+
+    Uses base model path (no subpath) for the status URL per fal.ai Queue API:
+    "The subpath should be used when making the request, but not when getting
+    request status or results."
+
     Args:
-        model_id: Model identifier
+        model_id: Full model identifier (e.g. fal-ai/flux/schnell)
         request_id: Request ID from submit_queue
-    
+        job_id: Optional gateway job_id for logging
+
     Returns:
         (success, status_data, error_message)
-        
+
     Status data structure:
         {
             "status": "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED",
@@ -121,28 +151,40 @@ async def get_queue_status(model_id: str, request_id: str) -> Tuple[bool, Option
             "queue_position": N (when IN_QUEUE)
         }
     """
+    status_model_id = model_id_for_queue_status(model_id)
+    url = f"{FAL_QUEUE_BASE}/{status_model_id}/requests/{request_id}/status"
     try:
-        url = f"{FAL_QUEUE_BASE}/{model_id}/requests/{request_id}/status"
         headers = _get_auth_headers()
-        
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(url, headers=headers)
-            
+
             if response.status_code == 200:
                 data = response.json()
                 return True, data, None
             else:
                 # Correction #4: Transient errors should not fail the job
-                # Return error but don't mark as terminal failure
-                error_msg = f"Status check returned {response.status_code}"
+                error_msg = (
+                    f"FAL status check {response.status_code} "
+                    f"model_id={model_id} status_model_id={status_model_id}"
+                )
+                body_preview = (response.text or "")[:300]
+                if body_preview:
+                    error_msg = f"{error_msg} body={body_preview}"
+                if job_id:
+                    log_error(job_id, error_msg)
                 return False, None, error_msg
-    
+
     except (httpx.TimeoutException, httpx.RequestError) as e:
         # Correction #4: Network errors are transient
         error_msg = f"Transient error checking status: {type(e).__name__}"
+        if job_id:
+            log_error(job_id, error_msg)
         return False, None, error_msg
     except Exception as e:
         error_msg = f"Unexpected error checking status: {str(e)}"
+        if job_id:
+            log_error(job_id, error_msg)
         return False, None, error_msg
 
 

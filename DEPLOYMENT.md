@@ -13,7 +13,7 @@ Quick deployment guide for DigitalOcean using Docker Compose.
 
 ### 1. Clone Repository
 ```bash
-cd /root
+# Clone into your preferred directory
 git clone https://github.com/RobinMcM/openrouter-gateway.git
 cd openrouter-gateway
 ```
@@ -67,7 +67,8 @@ docker compose logs -f
 ## 🔄 Update to Latest Version
 
 ```bash
-cd /root/openrouter-gateway
+# From the project directory (e.g. where you cloned the repo)
+cd /path/to/openrouter-gateway
 
 # Pull latest code
 git pull origin main

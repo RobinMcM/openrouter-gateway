@@ -233,8 +233,8 @@ docker exec valkey-gateway valkey-cli ping
 
 ### Unit Tests
 ```bash
-# Install dependencies first
-cd /root/openrouter-gateway
+# From the project directory
+cd /path/to/openrouter-gateway
 pip install -r requirements.txt
 
 # Run tests

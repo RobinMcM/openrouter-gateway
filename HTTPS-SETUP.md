@@ -14,8 +14,8 @@ Quick guide to enable HTTPS for your OpenRouter Gateway.
 ### On your DO server (134.209.184.66):
 
 ```bash
-# 1. Navigate to project directory
-cd /root/openrouter-gateway
+# 1. Navigate to project directory (e.g. where you cloned the repo)
+cd /path/to/openrouter-gateway
 
 # 2. Pull latest code
 git pull origin main
@@ -43,7 +43,7 @@ If you prefer manual setup:
 
 ### 1. Pull Latest Code
 ```bash
-cd /root/openrouter-gateway
+cd /path/to/openrouter-gateway  # or your project directory
 git pull origin main
 ```
 
@@ -211,7 +211,7 @@ ufw reload
 If you need to revert to HTTP-only:
 
 ```bash
-cd /root/openrouter-gateway
+cd /path/to/openrouter-gateway  # project directory
 git checkout HEAD~1 docker-compose.yml
 docker compose down
 docker compose up -d

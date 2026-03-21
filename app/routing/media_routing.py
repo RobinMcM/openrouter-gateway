@@ -10,6 +10,20 @@ Implements:
 from typing import Dict, Any, Optional
 
 
+# Canonical model IDs used for outbound Fal requests.
+MODEL_ID_ALIASES: Dict[str, str] = {
+    # Legacy ID -> canonical queue endpoint ID.
+    "fal-ai/minimax-hailuo-02/image-to-video": "fal-ai/minimax/hailuo-02/standard/image-to-video",
+}
+
+
+def canonicalize_model_id(model: str) -> str:
+    candidate = (model or "").strip()
+    if not candidate:
+        return candidate
+    return MODEL_ID_ALIASES.get(candidate, candidate)
+
+
 # Media routing configuration
 # Maps media_type to default model and execution mode
 MEDIA_ROUTING_CONFIG: Dict[str, Dict[str, Any]] = {
@@ -26,7 +40,7 @@ MEDIA_ROUTING_CONFIG: Dict[str, Dict[str, Any]] = {
         "description": "High-quality image generation with FLUX Pro"
     },
     "image-to-video": {
-        "model": "fal-ai/minimax-hailuo-02/image-to-video",
+        "model": "fal-ai/minimax/hailuo-02/standard/image-to-video",
         "mode": "queue",
         "timeout": 300,
         "description": "Convert image to video with MiniMax Hailuo-02"
@@ -71,7 +85,7 @@ ALLOWED_MODELS = {
     "fal-ai/sana",
     
     # Video models
-    "fal-ai/minimax-hailuo-02/image-to-video",
+    "fal-ai/minimax/hailuo-02/standard/image-to-video",
     "fal-ai/kling-video/v1/standard/image-to-video",
     "fal-ai/kling-video/v1/standard/text-to-video",
     "fal-ai/kling-video/v2.5/turbo-pro/image-to-video",
@@ -106,6 +120,7 @@ def get_routing_for_media_type(media_type: str, model_override: Optional[str] = 
     """
     # If model override provided, validate it
     if model_override:
+        model_override = canonicalize_model_id(model_override)
         if model_override not in ALLOWED_MODELS:
             return None  # Invalid model
         
@@ -133,7 +148,7 @@ def is_model_allowed(model: str) -> bool:
     """
     Check if model is in allowlist (Correction #9).
     """
-    return model in ALLOWED_MODELS
+    return canonicalize_model_id(model) in ALLOWED_MODELS
 
 
 def list_media_types() -> list[str]:

@@ -48,6 +48,19 @@ MEDIA_PRICING_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     
     # Video models - per second pricing
+    "fal-ai/minimax/hailuo-02/standard/image-to-video": {
+        "strategy": "per_second",
+        "cost_per_second": 0.08,
+        "default_duration": 5,
+        "description": "MiniMax Hailuo-02 image-to-video"
+    },
+    # Legacy alias retained for backward compatibility in historical records.
+    "fal-ai/minimax-hailuo-02/image-to-video": {
+        "strategy": "per_second",
+        "cost_per_second": 0.08,
+        "default_duration": 5,
+        "description": "MiniMax Hailuo-02 image-to-video (legacy alias)"
+    },
     "fal-ai/kling-video/v1/standard/image-to-video": {
         "strategy": "per_second",
         "cost_per_second": 0.08,

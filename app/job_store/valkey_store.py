@@ -82,6 +82,8 @@ class ValkeyJobStore:
             
             job_data = {
                 "status": "queued",
+                "stage": "validated",
+                "stage_history_json": json.dumps(["validated"]),
                 "provider": provider,
                 "media_type": media_type,
                 "model": model,
@@ -89,6 +91,8 @@ class ValkeyJobStore:
                 "estimate_json": json.dumps(estimate),
                 "provider_request_id": "",  # Set when submitted to provider
                 "result_json": "",
+                "destination_json": "",
+                "transform_trace_json": "",
                 "error": "",
                 "created_at": now,
                 "updated_at": now
@@ -168,6 +172,24 @@ class ValkeyJobStore:
                     job_data["result"] = json.loads(job_data["result_json"])
                 except json.JSONDecodeError:
                     job_data["result"] = None
+
+            if job_data.get("stage_history_json"):
+                try:
+                    job_data["stage_history"] = json.loads(job_data["stage_history_json"])
+                except json.JSONDecodeError:
+                    job_data["stage_history"] = []
+
+            if job_data.get("destination_json"):
+                try:
+                    job_data["destination"] = json.loads(job_data["destination_json"])
+                except json.JSONDecodeError:
+                    job_data["destination"] = {}
+
+            if job_data.get("transform_trace_json"):
+                try:
+                    job_data["transform_trace"] = json.loads(job_data["transform_trace_json"])
+                except json.JSONDecodeError:
+                    job_data["transform_trace"] = {}
             
             return job_data
         

@@ -57,6 +57,48 @@ class AsyncJobResponse(BaseModel):
     estimate: Dict[str, Any]  # Cost estimate
 
 
+# Generic media contract (final stabilization)
+class GenericExecuteDestination(BaseModel):
+    target: Optional[str] = Field(default=None, description="Destination target, e.g. digitalocean-spaces")
+    bucket: Optional[str] = None
+    path_prefix: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class GenericExecuteRequest(BaseModel):
+    provider: Literal["fal"] = "fal"
+    query_type: Literal["text", "text-image", "image-video", "text-music"]
+    model: str
+    source_image: Optional[str] = Field(default=None, description="Source image URL/path for image-video jobs")
+    destination: Optional[GenericExecuteDestination] = None
+    options: Dict[str, Any] = Field(default_factory=dict, description="Generic options from caller")
+    dry_run: bool = False
+    webhook_url: Optional[str] = None
+
+
+class GenericExecuteResponse(BaseModel):
+    status: str = "ok"
+    provider: str = "fal"
+    query_type: str
+    model: str
+    canonical_model: str
+    media_type: str
+    accepted_fields: List[str] = Field(default_factory=list)
+    defaulted_fields: Dict[str, Any] = Field(default_factory=dict)
+    dropped_fields: List[str] = Field(default_factory=list)
+    provider_request: Dict[str, Any] = Field(default_factory=dict)
+    destination: Dict[str, Any] = Field(default_factory=dict)
+    stage: str
+    stage_history: List[str] = Field(default_factory=list)
+    job_id: Optional[str] = None
+    job_status: Optional[str] = None
+    status_url: Optional[str] = None
+    estimate: Optional[Dict[str, Any]] = None
+    result: Optional[Dict[str, Any]] = None
+    usage: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
 # Standard response schemas matching ffmpeg-api pattern
 class SuccessResponse(BaseModel):
     status: str = "ok"
@@ -187,3 +229,6 @@ class JobStatusResponse(BaseModel):
     usage: Optional[Dict[str, Any]] = None  # Cost info when completed
     error: Optional[str] = None  # Error message when failed
     warning: Optional[str] = None  # Transient errors
+    stage: Optional[str] = None
+    stage_history: Optional[List[str]] = None
+    destination: Optional[Dict[str, Any]] = None

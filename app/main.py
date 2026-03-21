@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Depends, Request, Query
 from fastapi.responses import HTMLResponse
 import uuid
+from typing import Optional
 from app.auth import verify_api_key, verify_admin_key
 from app.schemas import (
     RouteRequest, RouteResponse, ExecuteRequest, ExecuteResponse,
@@ -24,7 +25,7 @@ from app.providers.openrouter_client import (
 )
 # FAL gateway imports
 from app.providers import fal_client
-from app.routing.media_routing import get_routing_for_media_type, is_model_allowed
+from app.routing.media_routing import get_routing_for_media_type, is_model_allowed, list_media_models
 from app.pricing.media_pricing import calculate_cost_estimate as calculate_media_cost
 from app.pricing.media_pricing import extract_actual_usage as extract_media_usage
 from app.job_store.valkey_store import get_valkey_store
@@ -222,6 +223,25 @@ async def get_models(api_key: str = Depends(verify_api_key)):
     except Exception as e:
         log_error(job_id, str(e))
         return ErrorResponse(message=f"Unexpected error: {str(e)}")
+
+
+@app.get("/api/media/models")
+async def get_media_models(
+    media_type: Optional[str] = Query(default=None),
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    List media-capable models for FAL usage.
+    Optional media_type filter supports: image-generation, image-to-video,
+    video-generation, audio-generation.
+    """
+    rows = list_media_models(media_type=media_type)
+    return {
+        "status": "ok",
+        "models": rows,
+        "count": len(rows),
+        "media_type": media_type,
+    }
 
 
 @app.get("/api/models-showcase", response_model=ModelsShowcaseResponse)
@@ -1966,3 +1986,36 @@ async def get_job_status(
     except Exception as e:
         log_error(job_id, f"Unexpected error: {str(e)}")
         return ErrorResponse(message=f"Unexpected error: {str(e)}")
+
+
+@app.get("/api/result/{job_id}")
+async def get_job_result(
+    job_id: str,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Return result payload for a previously submitted async job.
+    Keeps compatibility with clients that probe /api/result/{job_id}.
+    """
+    valkey = await get_valkey_store()
+    job = await valkey.get_job(job_id)
+    if not job:
+        return ErrorResponse(message=f"Job {job_id} not found")
+    return {
+        "status": "ok",
+        "ok": job.get("status") == "completed",
+        "job_id": job_id,
+        "job_status": job.get("status"),
+        "result": job.get("result"),
+        "usage": job.get("estimate"),
+        "error": job.get("error"),
+    }
+
+
+@app.get("/api/results/{job_id}")
+async def get_job_results_alias(
+    job_id: str,
+    api_key: str = Depends(verify_api_key),
+):
+    """Alias for /api/result/{job_id}."""
+    return await get_job_result(job_id=job_id, api_key=api_key)

@@ -321,6 +321,27 @@ livenessProbe:
   periodSeconds: 10
 ```
 
+## Canary Testing Guard
+
+Use the gated canary runner to avoid testing before the gateway is ready:
+
+```bash
+python3 scripts/run_canary.py
+```
+
+The runner reads these values from `.env`:
+
+```bash
+GATEWAY_BASE_URL=https://usageflows.info
+GATEWAY_INTERNAL_API_KEY=...
+GATEWAY_TIMEOUT_SECONDS=45
+```
+
+It waits for both readiness checks before executing canary calls:
+
+- `GET /health`
+- `GET /api/instructions` (with `X-Internal-API-Key`)
+
 ## License
 
 Internal use only. No public distribution.

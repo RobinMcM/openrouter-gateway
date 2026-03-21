@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, Request, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import uuid
 from typing import Optional
 from app.auth import verify_api_key, verify_admin_key
@@ -1749,7 +1749,10 @@ async def execute_generic_fal(request: GenericExecuteRequest) -> GenericExecuteR
         stage_history.append("transformed")
         canonical_model = str(trace.get("canonical_model") or request.model).strip()
         if not is_model_allowed(canonical_model):
-            return ErrorResponse(message=f"Model '{canonical_model}' not in allowlist")
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": f"Model '{canonical_model}' not in allowlist"},
+            )
 
         estimate = calculate_media_cost(canonical_model, transformed_payload)
         provider_request = {
@@ -1842,6 +1845,11 @@ async def execute_generic_fal(request: GenericExecuteRequest) -> GenericExecuteR
             job_status="processing",
             status_url=f"/api/status/{job_id}",
             estimate=estimate,
+        )
+    except ValueError as e:
+        return JSONResponse(
+            status_code=422,
+            content={"status": "error", "message": str(e)},
         )
     except Exception as e:
         log_error(job_id, str(e))

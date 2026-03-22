@@ -332,7 +332,7 @@ python3 scripts/run_canary.py
 The runner reads these values from `.env`:
 
 ```bash
-GATEWAY_BASE_URL=https://usageflows.info
+GATEWAY_BASE_URL=https://models.rapidmvp.io
 GATEWAY_INTERNAL_API_KEY=...
 GATEWAY_TIMEOUT_SECONDS=45
 ```

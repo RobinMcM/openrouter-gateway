@@ -1,10 +1,10 @@
 #!/bin/bash
 # HTTPS Setup Script for OpenRouter Gateway
-# Domain: usageflows.info
+# Domain: models.rapidmvp.io
 
 set -e
 
-echo "🔒 OpenRouter Gateway HTTPS Setup"
+echo "🔒 OpenRouter Models HTTPS Setup"
 echo "==================================="
 echo ""
 
@@ -46,9 +46,7 @@ docker compose run --rm certbot certonly \
   --email "$EMAIL" \
   --agree-tos \
   --no-eff-email \
-  -d usageflows.info \
-  -d www.usageflows.info \
-  -d api.usageflows.info
+  -d models.rapidmvp.io
 
 if [ $? -ne 0 ]; then
     echo "❌ Error: Failed to obtain SSL certificate"
@@ -71,12 +69,10 @@ echo ""
 echo "✅ HTTPS setup complete!"
 echo ""
 echo "Testing endpoints:"
-echo "  - Health: curl -I https://usageflows.info/health"
-echo "  - API: curl -H 'X-Internal-API-Key: YOUR_KEY' https://usageflows.info/api/models"
+echo "  - Health: curl -I https://models.rapidmvp.io/health"
+echo "  - API: curl -H 'X-Internal-API-Key: YOUR_KEY' https://models.rapidmvp.io/api/models"
 echo ""
-echo "🎉 Your OpenRouter Gateway is now secured with HTTPS!"
-echo "   - usageflows.info"
-echo "   - www.usageflows.info"
-echo "   - api.usageflows.info"
+echo "🎉 Your OpenRouter Models API is now secured with HTTPS!"
+echo "   - models.rapidmvp.io"
 echo ""
 echo "Certificate will auto-renew every 90 days."

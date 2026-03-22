@@ -19,7 +19,7 @@ All requests must include the gateway’s internal API key:
 
 ## Base URL
 
-- **Production example:** `https://usageflows.info`
+- **Production example:** `https://models.rapidmvp.io`
 - Base URL is deployment-specific; use the URL where the OpenRouter Gateway is hosted.
 
 ---
@@ -222,7 +222,7 @@ Exact defaults and allowlist are in the gateway (e.g. `app/routing/media_routing
 **Submit job:**
 
 ```bash
-curl -X POST "https://usageflows.info/api/execute" \
+curl -X POST "https://models.rapidmvp.io/api/execute" \
   -H "X-Internal-API-Key: YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -239,7 +239,7 @@ curl -X POST "https://usageflows.info/api/execute" \
 **Poll status (replace JOB_ID):**
 
 ```bash
-curl -s "https://usageflows.info/api/status/JOB_ID" \
+curl -s "https://models.rapidmvp.io/api/status/JOB_ID" \
   -H "X-Internal-API-Key: YOUR_KEY" | jq
 ```
 
@@ -248,14 +248,14 @@ curl -s "https://usageflows.info/api/status/JOB_ID" \
 ```bash
 JOB_ID="<from-submit-response>"
 while true; do
-  STATUS=$(curl -s "https://usageflows.info/api/status/$JOB_ID" \
+  STATUS=$(curl -s "https://models.rapidmvp.io/api/status/$JOB_ID" \
     -H "X-Internal-API-Key: YOUR_KEY" | jq -r '.job_status')
   echo "Status: $STATUS"
   [ "$STATUS" = "completed" ] && break
   [ "$STATUS" = "failed" ] && break
   sleep 2
 done
-curl -s "https://usageflows.info/api/status/$JOB_ID" -H "X-Internal-API-Key: YOUR_KEY" | jq
+curl -s "https://models.rapidmvp.io/api/status/$JOB_ID" -H "X-Internal-API-Key: YOUR_KEY" | jq
 ```
 
 ---

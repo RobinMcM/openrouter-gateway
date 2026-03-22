@@ -1,13 +1,11 @@
-# HTTPS Setup for usageflows.info
+# HTTPS Setup for models.rapidmvp.io
 
 Quick guide to enable HTTPS for your OpenRouter Gateway.
 
 ## Prerequisites
 
-✅ DNS records configured (already done):
-- `usageflows.info` → `134.209.184.66`
-- `www.usageflows.info` → `134.209.184.66`
-- `api.usageflows.info` → `134.209.184.66`
+✅ DNS record configured (already done):
+- `models.rapidmvp.io` → `134.209.184.66`
 
 ## Quick Setup (Recommended)
 
@@ -73,9 +71,7 @@ docker compose run --rm certbot certonly \
   --email your-email@example.com \
   --agree-tos \
   --no-eff-email \
-  -d usageflows.info \
-  -d www.usageflows.info \
-  -d api.usageflows.info
+  -d models.rapidmvp.io
 ```
 
 ### 6. Restart Nginx
@@ -88,32 +84,25 @@ docker compose up -d certbot
 
 ### Test HTTP to HTTPS Redirect
 ```bash
-curl -I http://usageflows.info/health
+curl -I http://models.rapidmvp.io/health
 # Should return: 301 Moved Permanently
 ```
 
 ### Test HTTPS Health Endpoint
 ```bash
-curl -I https://usageflows.info/health
+curl -I https://models.rapidmvp.io/health
 # Should return: 200 OK
 ```
 
 ### Test API with HTTPS
 ```bash
 curl -H "X-Internal-API-Key: YOUR_KEY" \
-  https://usageflows.info/api/models
+  https://models.rapidmvp.io/api/models
 ```
 
-### Test All Domains
+### Test API Domain
 ```bash
-# Main domain
-curl -I https://usageflows.info/health
-
-# WWW subdomain
-curl -I https://www.usageflows.info/health
-
-# API subdomain
-curl -I https://api.usageflows.info/health
+curl -I https://models.rapidmvp.io/health
 ```
 
 ## Update Frontend
@@ -121,13 +110,8 @@ curl -I https://api.usageflows.info/health
 Update your frontend `.env` file:
 
 ```bash
-# Old
-VITE_API_BASE_URL=http://134.209.184.66:8000
-
-# New (choose one)
-VITE_API_BASE_URL=https://usageflows.info
-# or
-VITE_API_BASE_URL=https://api.usageflows.info
+# New
+VITE_API_BASE_URL=https://models.rapidmvp.io
 ```
 
 ## Certificate Management
@@ -145,7 +129,7 @@ docker compose restart nginx
 
 ### View Certificate Expiry
 ```bash
-echo | openssl s_client -servername usageflows.info -connect usageflows.info:443 2>/dev/null | openssl x509 -noout -dates
+echo | openssl s_client -servername models.rapidmvp.io -connect models.rapidmvp.io:443 2>/dev/null | openssl x509 -noout -dates
 ```
 
 ## Monitoring
@@ -171,13 +155,13 @@ docker compose ps
 
 **Check DNS:**
 ```bash
-nslookup usageflows.info
-dig usageflows.info +short
+nslookup models.rapidmvp.io
+dig models.rapidmvp.io +short
 ```
 
 **Check Port 80 is accessible:**
 ```bash
-curl -I http://usageflows.info/.well-known/acme-challenge/test
+curl -I http://models.rapidmvp.io/.well-known/acme-challenge/test
 ```
 
 **Check firewall:**
@@ -230,7 +214,7 @@ docker compose up -d
 
 For issues, check:
 1. Docker logs: `docker compose logs`
-2. Nginx configuration: `nginx/conf.d/usageflows.conf`
+2. Nginx configuration: `nginx/conf.d/models.rapidmvp.io.conf`
 3. Certificate status: `docker compose run --rm certbot certificates`
 
 ---

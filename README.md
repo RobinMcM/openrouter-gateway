@@ -1,177 +1,90 @@
 # OpenRouter Gateway
 
-Internal-only microservice for OpenRouter model routing, cost estimation, and execution.
+Stateless AI execution gateway for MovieShaker and RapidMVP apps.
+Routes requests to OpenRouter (text) or FAL.ai (image/video/audio)
+and returns results with per-request cost information.
 
-## Overview
+**The gateway does not track user billing.** Cost attribution is handled
+by the calling service.
 
-This service provides a simplified interface to OpenRouter's API with:
-- Intelligent model routing based on job type
-- Cost estimation before execution
-- Admin markup calculation
-- Comprehensive logging with secret sanitization
-- Timing-attack resistant authentication
+## Providers
 
-## Architecture
-
-- **Language**: Python 3.11
-- **Framework**: FastAPI + Pydantic
-- **HTTP Client**: httpx (async)
-- **Authentication**: Single API key with `hmac.compare_digest`
-- **Logging**: Structured logs to `/tmp/openrouter-gateway.log`
+| Provider | Media Types | Execution |
+|----------|-------------|-----------|
+| OpenRouter | text-completion, text-generation | Synchronous |
+| FAL.ai | image-generation, image-to-video, video-generation, audio-generation | Asynchronous (queue) |
 
 ## Setup
 
 ### Environment Variables
 
-**Required** (service fails fast if missing):
+**Required:**
 ```bash
 INTERNAL_API_KEY=your-secret-internal-key
 OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key
+FAL_KEY=your-fal-key
 ```
 
-**Optional**:
+**Optional:**
 ```bash
+ADMIN_API_KEY=your-admin-key
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+FAL_SYNC_BASE=https://fal.run
+FAL_QUEUE_BASE=https://queue.fal.run
 ADMIN_MARKUP_PERCENT=0.10
 ADMIN_FIXED_FEE=0.001
-```
-
-### Docker Build & Run
-
-```bash
-# Build image
-docker build -t openrouter-gateway .
-
-# Run container
-docker run -d \
-  -p 8000:8000 \
-  -e INTERNAL_API_KEY=your-secret-key \
-  -e OPENROUTER_API_KEY=sk-or-v1-xxx \
-  openrouter-gateway
 ```
 
 ### Local Development
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Set environment variables
 export INTERNAL_API_KEY=test-key
 export OPENROUTER_API_KEY=sk-or-v1-xxx
-
-# Run service
+export FAL_KEY=your-fal-key
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+### Docker
+
+```bash
+docker build -t openrouter-gateway .
+docker run -d -p 8000:8000 \
+  -e INTERNAL_API_KEY=your-secret-key \
+  -e OPENROUTER_API_KEY=sk-or-v1-xxx \
+  -e FAL_KEY=your-fal-key \
+  openrouter-gateway
+```
+
+## Authentication
+
+All `/api/*` endpoints require:
+```
+X-Internal-API-Key: your-secret-key
+```
+
+Only `GET /health` is unauthenticated.
+`GET /api/logs` and config endpoints require `ADMIN_API_KEY` if set.
+
 ## API Endpoints
 
-### `GET /health`
-Unauthenticated health check.
-
+### Health
 ```bash
 curl http://localhost:8000/health
+# → {"status": "healthy"}
 ```
 
-Response:
-```json
-{"status": "healthy"}
-```
-
-### `GET /api/instructions`
-Get API documentation and endpoint schemas.
-
-```bash
-curl -H "X-Internal-API-Key: your-key" \
-  http://localhost:8000/api/instructions
-```
-
-### `GET /api/logs?lines=200`
-Get recent operational logs (sanitized).
-
-```bash
-curl -H "X-Internal-API-Key: your-key" \
-  "http://localhost:8000/api/logs?lines=100"
-```
-
-Response:
-```json
-{
-  "status": "ok",
-  "lines": 100,
-  "logs": ["2026-01-13T10:30:00Z INFO job=abc123 endpoint=route status=started", "..."]
-}
-```
-
-### `POST /api/route`
-Get routing decision and cost estimate (does NOT call OpenRouter).
-
-```bash
-curl -X POST http://localhost:8000/api/route \
-  -H "X-Internal-API-Key: your-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "job_type": "text-completion",
-    "input_data": {
-      "prompt": "Hello, how are you?",
-      "max_tokens": 100
-    }
-  }'
-```
-
-Response:
-```json
-{
-  "status": "ok",
-  "routing": {
-    "provider": "openai",
-    "model": "gpt-4",
-    "endpoint": "/chat/completions"
-  },
-  "estimate": {
-    "input_tokens": 5,
-    "output_tokens": 100,
-    "input_cost": 0.00015,
-    "output_cost": 0.006,
-    "subtotal": 0.00615,
-    "admin_markup_percent": 0.10,
-    "admin_markup_fixed": 0.001,
-    "admin_total": 0.001615,
-    "total": 0.007765,
-    "estimated": true
-  }
-}
-```
-
-### `POST /api/execute`
-Execute OpenRouter API call or dry-run.
-
-**Dry Run Example** (no OpenRouter call):
+### Text Completion (OpenRouter — synchronous)
 ```bash
 curl -X POST http://localhost:8000/api/execute \
   -H "X-Internal-API-Key: your-key" \
   -H "Content-Type: application/json" \
   -d '{
+    "provider": "openrouter",
     "job_type": "text-completion",
     "payload": {
-      "model": "gpt-4",
+      "model": "openai/gpt-4.1-mini",
       "messages": [{"role": "user", "content": "Hello!"}]
-    },
-    "dry_run": true
-  }'
-```
-
-**Execute Example** (makes actual OpenRouter call):
-```bash
-curl -X POST http://localhost:8000/api/execute \
-  -H "X-Internal-API-Key: your-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "job_type": "text-completion",
-    "payload": {
-      "model": "gpt-4",
-      "messages": [{"role": "user", "content": "Hello!"}],
-      "max_tokens": 50
     },
     "dry_run": false
   }'
@@ -181,167 +94,91 @@ Response:
 ```json
 {
   "status": "ok",
-  "routing": {
-    "provider": "openai",
-    "model": "gpt-4",
-    "endpoint": "/chat/completions"
-  },
-  "result": {
-    "id": "chatcmpl-xxx",
-    "choices": [{"message": {"content": "Hello there!"}}]
-  },
-  "usage": {
-    "input_tokens": 8,
-    "output_tokens": 5,
-    "input_cost": 0.00024,
-    "output_cost": 0.0003,
-    "subtotal": 0.00054,
-    "admin_total": 0.000154,
-    "total": 0.000694,
-    "estimated": false
-  }
+  "routing": { "provider": "openrouter", "model": "openai/gpt-4.1-mini" },
+  "result": { "choices": [{ "message": { "content": "Hello there!" } }] },
+  "usage": { "input_tokens": 8, "output_tokens": 5, "total_cost": 0.00054 }
 }
 ```
 
-## Supported Job Types
+### Media Generation (FAL.ai — asynchronous)
+```bash
+# Submit job
+curl -X POST http://localhost:8000/api/media/execute \
+  -H "X-Internal-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "fal",
+    "query_type": "image-video",
+    "model": "fal-ai/veo3/image-to-video",
+    "source_image": "https://example.com/image.jpg",
+    "options": { "duration": "6s" },
+    "dry_run": false
+  }'
+# → { "job_id": "abc-123", "job_status": "queued", ... }
 
-Default routing configuration:
-- `text-completion` → OpenAI GPT-4
-- `text-generation` → OpenAI GPT-3.5-turbo
-- `image-generation` → Stability AI Stable Diffusion XL
-- `image-to-video` → Runway Gen-2
-- `video-generation` → Runway Gen-2
-- `audio-generation` → ElevenLabs Multilingual v2
-- `text-to-speech` → ElevenLabs Multilingual v2
-
-## Configuration
-
-### Routing Config
-
-Override with `ROUTING_CONFIG_JSON` or `ROUTING_CONFIG_PATH`:
-
-```json
-{
-  "text-completion": {
-    "provider": "openai",
-    "model": "gpt-4",
-    "endpoint": "/chat/completions"
-  },
-  "image-generation": {
-    "provider": "stability",
-    "model": "stable-diffusion-xl",
-    "endpoint": "/images/generations"
-  }
-}
+# Poll for result
+curl -H "X-Internal-API-Key: your-key" \
+  http://localhost:8000/api/status/abc-123
+# → { "job_status": "completed", "result": { "files": [...] }, "usage": {...} }
 ```
 
-### Pricing Config
-
-Override with `PRICING_CONFIG_JSON` or `PRICING_CONFIG_PATH`:
-
-```json
-{
-  "gpt-4": {
-    "input_cost_per_1k": 0.03,
-    "output_cost_per_1k": 0.06
-  },
-  "stable-diffusion-xl": {
-    "per_image": 0.05
-  }
-}
+### Cost Estimate (no provider call)
+```bash
+curl -X POST http://localhost:8000/api/route \
+  -H "X-Internal-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{ "job_type": "text-completion", "input_data": { "prompt": "Hello" } }'
 ```
 
-## Security Considerations
+### Available Models
+```bash
+# OpenRouter text models
+curl -H "X-Internal-API-Key: your-key" http://localhost:8000/api/models
 
-### Authentication
-- Single API key stored in `INTERNAL_API_KEY` env var
-- Uses `hmac.compare_digest()` for timing-attack resistant comparison
-- All `/api/*` endpoints require `X-Internal-API-Key` header
-- Only `/health` endpoint is unauthenticated
+# FAL media models
+curl -H "X-Internal-API-Key: your-key" http://localhost:8000/api/media/models
 
-### Logging Sanitization
-**NEVER logged**:
-- `INTERNAL_API_KEY` env var value
-- `OPENROUTER_API_KEY` env var value
-- `X-Internal-API-Key` request header
-- `Authorization` request header (used for OpenRouter)
-- API keys in request/response bodies
-
-All logs are sanitized before writing and before serving via `/api/logs`.
-
-### Fail Fast
-Service will not start if required env vars are missing:
-- `INTERNAL_API_KEY`
-- `OPENROUTER_API_KEY`
-
-### No Shell Execution
-- Uses `httpx` for HTTP requests (no subprocess/shell)
-- No `shell=True` anywhere in codebase
-
-### Minimal Dependencies
-Only essential packages:
-- `fastapi` - Web framework
-- `uvicorn` - ASGI server
-- `pydantic` - Data validation
-- `httpx` - Async HTTP client
-
-## Error Handling
-
-All errors return consistent format:
-```json
-{
-  "status": "error",
-  "message": "Error description"
-}
+# FAL media models filtered by type
+curl -H "X-Internal-API-Key: your-key" \
+  "http://localhost:8000/api/media/models?media_type=image-to-video"
 ```
 
-HTTP status codes:
-- `200` - Success
-- `401` - Missing or invalid API key
-- `422` - Validation error (Pydantic)
-- `500` - Server error (logged)
+## Async Job Lifecycle (FAL.ai)
 
-## Logging Format
-
-Structured logs in UTC:
 ```
-2026-01-13T10:30:00Z INFO job=abc-123 endpoint=route status=started
-2026-01-13T10:30:01Z INFO job=abc-123 status=success job_type=text-completion model=gpt-4
-```
+POST /api/execute or /api/media/execute
+  → job_id returned immediately, job_status: "queued"
 
-## Monitoring
+GET /api/status/{job_id}   ← poll until completed or failed
+  → job_status: "processing"
+  → job_status: "completed" + result + usage
+  → job_status: "failed" + error
 
-Use `/health` endpoint for liveness/readiness probes:
-```yaml
-livenessProbe:
-  httpGet:
-    path: /health
-    port: 8000
-  initialDelaySeconds: 5
-  periodSeconds: 10
+GET /api/result/{job_id}   ← fetch result directly
 ```
 
-## Canary Testing Guard
+Job state is held in Valkey — transient, not for billing.
+The calling service must persist results and costs.
 
-Use the gated canary runner to avoid testing before the gateway is ready:
+## Canary Testing
 
 ```bash
+# Requires .env with GATEWAY_BASE_URL and GATEWAY_INTERNAL_API_KEY
 python3 scripts/run_canary.py
 ```
 
-The runner reads these values from `.env`:
+Waits for `/health` and `/api/instructions` before running smoke tests.
 
-```bash
-GATEWAY_BASE_URL=https://models.rapidmvp.io
-GATEWAY_INTERNAL_API_KEY=...
-GATEWAY_TIMEOUT_SECONDS=45
-```
+## Security
 
-It waits for both readiness checks before executing canary calls:
+- `INTERNAL_API_KEY`, `OPENROUTER_API_KEY`, `FAL_KEY` are never logged
+- FAL response URL host is validated against an allowlist before fetching
+- CORS is handled by Nginx — not in FastAPI application code
+- Service fails fast on startup if required env vars are missing
 
-- `GET /health`
-- `GET /api/instructions` (with `X-Internal-API-Key`)
+## Deployment
 
-## License
+Deployed at `https://models.rapidmvp.io` on a DigitalOcean Droplet.
+HTTPS and CORS managed by Nginx — see `nginx/conf.d/models.rapidmvp.io.conf`.
 
-Internal use only. No public distribution.
+See `DEPLOYMENT.md` for full deployment runbook.

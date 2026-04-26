@@ -2261,9 +2261,10 @@ _CLASSIFY_CONTEXT_MODE_MAP = {
     "shotlist": "codirector",
     "moodboard": "codirector",
     "budgets": "coproducer",
+    "objects": "codesigner",
 }
 
-_CLASSIFY_VALID_AGENTS = {"cowriter", "coproducer", "codirector"}
+_CLASSIFY_VALID_AGENTS = {"cowriter", "coproducer", "codirector", "codesigner"}
 
 _CLASSIFY_SYSTEM_PROMPT = (
     "You are a routing classifier for a film production platform. "
@@ -2275,9 +2276,12 @@ _CLASSIFY_SYSTEM_PROMPT = (
     "coproducer — handles scheduling, budgeting, locations, cast logistics, "
     "shooting days, costs, production\n"
     "codirector — handles shots, cameras, visual composition, moodboard, "
-    "image generation, tram lines, filming setup\n\n"
+    "image generation, tram lines, filming setup\n"
+    "codesigner — handles visual identity, character appearance consistency, "
+    "background generation, prop and artifact tracking, the look and feel of the film, "
+    "colour palette, visual continuity\n\n"
     'Return format:\n'
-    '{"agent": "cowriter|coproducer|codirector", "confidence": 0.0-1.0, "reasoning": "one sentence"}'
+    '{"agent": "cowriter|coproducer|codirector|codesigner", "confidence": 0.0-1.0, "reasoning": "one sentence"}'
 )
 
 
@@ -2307,7 +2311,7 @@ async def classify_message(
         ("/moodboard",    "codirector", 0.95),
         ("/visualize",    "codirector", 0.95),
         ("/budgeting",    "coproducer", 0.95),
-        ("/objects",      "cowriter",   0.90),
+        ("/objects",      "codesigner", 0.95),
         ("/film-in-a-box","cowriter",   0.90),
     ]
     for fragment, agent, confidence in page_rules:

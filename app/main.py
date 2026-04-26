@@ -11,7 +11,8 @@ from app.schemas import (
     TestOpenRouterKeyResponse, OpenRouterKeyStatusResponse,
     SuccessResponse, ModelsShowcaseResponse, ShowcaseCategory, ShowcaseModel,
     OpenRouterExecuteRequest, FalExecuteRequest, AsyncJobResponse, JobStatusResponse,
-    GenericExecuteRequest, GenericExecuteResponse
+    GenericExecuteRequest, GenericExecuteResponse,
+    ClassifyRequest, ClassifyResponse
 )
 from app.models_data import OPENROUTER_MODELS
 from app.movieshaker_models_data import MOVIESHAKER_MODELS, CATEGORIES
@@ -2252,3 +2253,125 @@ async def get_job_results_alias(
 ):
     """Alias for /api/result/{job_id}."""
     return await get_job_result(job_id=job_id, api_key=api_key)
+
+
+_CLASSIFY_CONTEXT_MODE_MAP = {
+    "scripts": "cowriter",
+    "scheduling": "coproducer",
+    "shotlist": "codirector",
+    "moodboard": "codirector",
+    "budgets": "coproducer",
+}
+
+_CLASSIFY_VALID_AGENTS = {"cowriter", "coproducer", "codirector"}
+
+_CLASSIFY_SYSTEM_PROMPT = (
+    "You are a routing classifier for a film production platform. "
+    "Classify the user message into exactly one agent. "
+    "Return ONLY valid JSON, no markdown, no explanation.\n\n"
+    "Agents:\n"
+    "cowriter — handles script, story, dialogue, character development, "
+    "creative writing, rewrites\n"
+    "coproducer — handles scheduling, budgeting, locations, cast logistics, "
+    "shooting days, costs, production\n"
+    "codirector — handles shots, cameras, visual composition, moodboard, "
+    "image generation, tram lines, filming setup\n\n"
+    'Return format:\n'
+    '{"agent": "cowriter|coproducer|codirector", "confidence": 0.0-1.0, "reasoning": "one sentence"}'
+)
+
+
+@app.post("/api/classify", response_model=ClassifyResponse | ErrorResponse)
+async def classify_message(
+    request: ClassifyRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    Classify a user message to determine which MovieShaker agent should handle it.
+
+    Priority order:
+    1. page_path rules (confidence 0.90-0.95) — no LLM call
+    2. context_mode rules (confidence 0.80) — no LLM call
+    3. LLM classification via google/gemini-flash-1.5 — for ambiguous cases only
+    """
+    job_id = str(uuid.uuid4())
+    log_request("classify", job_id)
+
+    path = request.page_path
+
+    # 1. Page path rules — high confidence, skip LLM
+    page_rules = [
+        ("/script/",      "cowriter",   0.95),
+        ("/scheduling",   "coproducer", 0.95),
+        ("/shotlist",     "codirector", 0.95),
+        ("/moodboard",    "codirector", 0.95),
+        ("/visualize",    "codirector", 0.95),
+        ("/budgeting",    "coproducer", 0.95),
+        ("/objects",      "cowriter",   0.90),
+        ("/film-in-a-box","cowriter",   0.90),
+    ]
+    for fragment, agent, confidence in page_rules:
+        if fragment in path:
+            log_success(job_id, f"page_rule agent={agent} path={path}")
+            return ClassifyResponse(
+                agent=agent,
+                confidence=confidence,
+                reasoning=f"Page context: {path}",
+            )
+
+    # 2. Context mode rules — medium confidence, skip LLM
+    mode = request.context_mode
+    if mode in _CLASSIFY_CONTEXT_MODE_MAP:
+        agent = _CLASSIFY_CONTEXT_MODE_MAP[mode]
+        log_success(job_id, f"context_mode_rule agent={agent} mode={mode}")
+        return ClassifyResponse(
+            agent=agent,
+            confidence=0.80,
+            reasoning=f"Context mode: {mode}",
+        )
+
+    # 3. LLM classification — only reached for general/unknown pages
+    import json as _json
+
+    payload = {
+        "model": "google/gemini-flash-1.5",
+        "messages": [
+            {"role": "system", "content": _CLASSIFY_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Context: {request.context_mode}\nMessage: {request.message}"},
+        ],
+        "max_tokens": 100,
+        "temperature": 0.1,
+    }
+
+    try:
+        success, response_data, error_msg = await call_openrouter("/chat/completions", payload)
+
+        if not success or not response_data:
+            raise ValueError(error_msg or "LLM call returned no data")
+
+        content = response_data["choices"][0]["message"]["content"].strip()
+
+        # Strip markdown fences if present
+        if content.startswith("```"):
+            lines = content.splitlines()
+            inner = lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]
+            content = "\n".join(inner)
+
+        parsed = _json.loads(content)
+        agent = str(parsed.get("agent", "")).lower()
+        if agent not in _CLASSIFY_VALID_AGENTS:
+            agent = "coproducer"
+        confidence = float(parsed.get("confidence", 0.7))
+        reasoning = str(parsed.get("reasoning", "LLM classification"))
+
+        log_success(job_id, f"llm agent={agent} confidence={confidence}")
+        return ClassifyResponse(agent=agent, confidence=confidence, reasoning=reasoning)
+
+    except Exception as e:
+        log_error(job_id, f"classify fallback triggered: {str(e)}")
+        fallback_agent = _CLASSIFY_CONTEXT_MODE_MAP.get(request.context_mode, "coproducer")
+        return ClassifyResponse(
+            agent=fallback_agent,
+            confidence=0.5,
+            reasoning="Fallback: classification unavailable",
+        )

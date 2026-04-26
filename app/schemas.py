@@ -232,3 +232,16 @@ class JobStatusResponse(BaseModel):
     stage: Optional[str] = None
     stage_history: Optional[List[str]] = None
     destination: Optional[Dict[str, Any]] = None
+
+
+# Agent classifier schemas
+class ClassifyRequest(BaseModel):
+    message: str
+    context_mode: str  # "scripts" | "scheduling" | "shotlist" | "moodboard" | "budgets" | "general"
+    page_path: str = ""  # current URL path for extra context
+
+
+class ClassifyResponse(BaseModel):
+    agent: str  # "cowriter" | "coproducer" | "codirector"
+    confidence: float  # 0.0 to 1.0
+    reasoning: str  # one sentence why

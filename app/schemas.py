@@ -245,3 +245,20 @@ class ClassifyResponse(BaseModel):
     agent: str  # "cowriter" | "coproducer" | "codirector"
     confidence: float  # 0.0 to 1.0
     reasoning: str  # one sentence why
+
+
+# OpenRouter synchronous image generation schemas
+class ImageGenerateRequest(BaseModel):
+    prompt: str
+    model_key: str = "flux-2-klein"
+    aspect_ratio: str = "1:1"
+    dry_run: bool = False
+
+
+class ImageGenerateResponse(BaseModel):
+    ok: bool
+    image_b64: Optional[str] = None   # base64-encoded image; None on dry_run
+    content_type: str = "image/png"
+    model: str                        # full OpenRouter model ID
+    model_key: str                    # short key from OPENROUTER_IMAGE_MODELS
+    dry_run: bool = False

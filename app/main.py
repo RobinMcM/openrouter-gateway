@@ -12,7 +12,8 @@ from app.schemas import (
     SuccessResponse, ModelsShowcaseResponse, ShowcaseCategory, ShowcaseModel,
     OpenRouterExecuteRequest, FalExecuteRequest, AsyncJobResponse, JobStatusResponse,
     GenericExecuteRequest, GenericExecuteResponse,
-    ClassifyRequest, ClassifyResponse
+    ClassifyRequest, ClassifyResponse,
+    ImageGenerateRequest, ImageGenerateResponse,
 )
 from app.models_data import OPENROUTER_MODELS
 from app.movieshaker_models_data import MOVIESHAKER_MODELS, CATEGORIES
@@ -27,6 +28,9 @@ from app.providers.openrouter_client import (
 )
 # FAL gateway imports
 from app.providers import fal_client
+# OpenRouter synchronous image generation
+from app.providers.openrouter_image_client import generate_image_openrouter
+from app.image_models import OPENROUTER_IMAGE_MODELS, DEFAULT_IMAGE_MODEL
 from app.routing.media_routing import get_routing_for_media_type, is_model_allowed
 from app.pricing.media_pricing import calculate_cost_estimate as calculate_media_cost
 from app.pricing.media_pricing import extract_actual_usage as extract_media_usage
@@ -2379,3 +2383,84 @@ async def classify_message(
             confidence=0.5,
             reasoning="Fallback: classification unavailable",
         )
+
+
+# ─── OpenRouter synchronous image generation ──────────────────────────────────
+
+@app.get("/api/image/models")
+def list_image_models(api_key: str = Depends(verify_api_key)):
+    """
+    List available OpenRouter image models with metadata.
+    Returns the full catalogue with model_key included in each entry.
+    """
+    models = [
+        {"model_key": key, **meta}
+        for key, meta in OPENROUTER_IMAGE_MODELS.items()
+    ]
+    return {
+        "status": "ok",
+        "models": models,
+        "count": len(models),
+        "default": DEFAULT_IMAGE_MODEL,
+    }
+
+
+@app.post("/api/image/generate", response_model=ImageGenerateResponse)
+def image_generate(
+    request: ImageGenerateRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Generate an image via OpenRouter synchronously.
+
+    Unlike the FAL path this is a single blocking call — no job_id, no polling.
+    The image is returned as base64 in the response body; the caller is
+    responsible for downloading/storing it (same pattern as the engine already
+    uses for FAL-generated images).
+
+    model_key must be one of the keys in OPENROUTER_IMAGE_MODELS.
+    """
+    model_entry = OPENROUTER_IMAGE_MODELS.get(request.model_key)
+    if not model_entry:
+        valid_keys = ", ".join(sorted(OPENROUTER_IMAGE_MODELS.keys()))
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": f"Unknown model_key '{request.model_key}'. Valid keys: {valid_keys}",
+            },
+        )
+
+    model_id: str = model_entry["model_id"]
+
+    if request.dry_run:
+        return ImageGenerateResponse(
+            ok=True,
+            image_b64=None,
+            content_type="image/png",
+            model=model_id,
+            model_key=request.model_key,
+            dry_run=True,
+        )
+
+    try:
+        result = generate_image_openrouter(
+            prompt=request.prompt,
+            model=model_id,
+            aspect_ratio=request.aspect_ratio,
+        )
+    except Exception as exc:
+        error_text = str(exc)
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "message": f"Image generation failed: {error_text}"},
+        )
+
+    return ImageGenerateResponse(
+        ok=True,
+        image_b64=result["image_b64"],
+        content_type=result["content_type"],
+        model=result["model"],
+        model_key=request.model_key,
+        dry_run=False,
+    )

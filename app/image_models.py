@@ -60,4 +60,4 @@ OPENROUTER_IMAGE_MODELS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-DEFAULT_IMAGE_MODEL = "flux-2-klein"
+DEFAULT_IMAGE_MODEL = "flux-2-pro"

@@ -26,7 +26,7 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 # Models that use modalities=["image","text"] and support image_config.aspect_ratio.
 # All other image models use modalities=["image"] only.
 GEMINI_IMAGE_MODELS: frozenset = frozenset({
-    "google/gemini-2.5-flash-image-preview",
+    "google/gemini-2.5-flash-image",
     "google/gemini-3.1-flash-image-preview",
     "google/gemini-3-pro-image-preview",
 })

@@ -67,8 +67,12 @@ def _extract_image_from_response(data: dict) -> tuple[str, str]:
 
 
 def _parse_image_item(item: dict) -> tuple[str, str]:
-    """Parse a single image dict that has a 'url' key."""
-    url = item.get("url") or ""
+    """Parse a single image dict that has a 'url' key or 'image_url' key."""
+    # Handle content array item: {"type": "image_url", "image_url": {"url": "..."}}
+    if item.get("type") == "image_url":
+        url = (item.get("image_url") or {}).get("url") or ""
+    else:
+        url = item.get("url") or ""
     if not url:
         raise ValueError(f"Image item has no 'url' field: {item}")
     return _decode_data_url(url)

@@ -38,33 +38,6 @@ def _extract_image_from_response(data: dict) -> tuple[str, str]:
 
     Tries three known shapes in order. Raises ValueError if none match.
     """
-    import json
-    debug_data = {}
-    for k, v in data.items():
-        if isinstance(v, str) and len(v) > 100:
-            debug_data[k] = v[:50] + "...[truncated]"
-        elif isinstance(v, list):
-            debug_data[k] = f"[list of {len(v)} items]"
-            if v:
-                first = v[0]
-                if isinstance(first, dict):
-                    debug_data[k] = f"[{len(v)} items, first keys: {list(first.keys())}]"
-        else:
-            debug_data[k] = v
-    print(f"RESPONSE STRUCTURE: {json.dumps(debug_data, default=str)}")
-
-    choices = data.get("choices", [])
-    if choices:
-        msg = choices[0].get("message", {})
-        print(f"CHOICE[0] message keys: {list(msg.keys())}")
-        content = msg.get("content", "")
-        if isinstance(content, str) and len(content) > 20:
-            print(f"content type: str, length: {len(content)}, starts: {content[:50]}")
-        elif isinstance(content, list):
-            print(f"content type: list, length: {len(content)}")
-            for i, item in enumerate(content[:3]):
-                print(f"  content[{i}] keys: {list(item.keys()) if isinstance(item, dict) else type(item)}")
-
     # Shape 1: top-level "images" array
     images = data.get("images")
     if isinstance(images, list) and images:

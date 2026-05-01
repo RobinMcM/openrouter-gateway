@@ -2450,10 +2450,14 @@ def image_generate(
             aspect_ratio=request.aspect_ratio,
         )
     except Exception as exc:
+        import traceback
         error_text = str(exc)
+        tb = traceback.format_exc()
+        print(f"IMAGE GENERATE ERROR: {error_text}")
+        print(f"TRACEBACK: {tb}")
         return JSONResponse(
             status_code=502,
-            content={"status": "error", "message": f"Image generation failed: {error_text}"},
+            content={"status": "error", "message": f"Image generation failed: {error_text}", "detail": tb},
         )
 
     return ImageGenerateResponse(

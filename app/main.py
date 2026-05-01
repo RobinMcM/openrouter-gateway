@@ -2405,43 +2405,24 @@ def list_image_models(api_key: str = Depends(verify_api_key)):
     }
 
 
-@app.post("/api/image/generate", response_model=ImageGenerateResponse)
+@app.post("/api/image/generate")
 def image_generate(
     request: ImageGenerateRequest,
     api_key: str = Depends(verify_api_key),
 ):
-    """
-    Generate an image via OpenRouter synchronously.
-
-    Unlike the FAL path this is a single blocking call — no job_id, no polling.
-    The image is returned as base64 in the response body; the caller is
-    responsible for downloading/storing it (same pattern as the engine already
-    uses for FAL-generated images).
-
-    model_key must be one of the keys in OPENROUTER_IMAGE_MODELS.
-    """
     model_entry = OPENROUTER_IMAGE_MODELS.get(request.model_key)
     if not model_entry:
         valid_keys = ", ".join(sorted(OPENROUTER_IMAGE_MODELS.keys()))
         return JSONResponse(
             status_code=400,
-            content={
-                "status": "error",
-                "message": f"Unknown model_key '{request.model_key}'. Valid keys: {valid_keys}",
-            },
+            content={"status": "error", "message": f"Unknown model_key. Valid: {valid_keys}"},
         )
 
-    model_id: str = model_entry["model_id"]
+    model_id = model_entry["model_id"]
 
     if request.dry_run:
-        return ImageGenerateResponse(
-            ok=True,
-            image_b64=None,
-            content_type="image/png",
-            model=model_id,
-            model_key=request.model_key,
-            dry_run=True,
-        )
+        return {"ok": True, "image_b64": None, "content_type": "image/png",
+                "model": model_id, "model_key": request.model_key, "dry_run": True}
 
     try:
         result = generate_image_openrouter(
@@ -2449,22 +2430,19 @@ def image_generate(
             model=model_id,
             aspect_ratio=request.aspect_ratio,
         )
+        return {
+            "ok": True,
+            "image_b64": result["image_b64"],
+            "content_type": result["content_type"],
+            "model": result["model"],
+            "model_key": request.model_key,
+            "dry_run": False,
+        }
     except Exception as exc:
         import traceback
-        error_text = str(exc)
-        tb = traceback.format_exc()
-        print(f"IMAGE GENERATE ERROR: {error_text}")
-        print(f"TRACEBACK: {tb}")
+        print(f"IMAGE GENERATE ERROR: {exc}")
+        print(traceback.format_exc())
         return JSONResponse(
             status_code=502,
-            content={"status": "error", "message": f"Image generation failed: {error_text}", "detail": tb},
+            content={"status": "error", "message": str(exc)},
         )
-
-    return ImageGenerateResponse(
-        ok=True,
-        image_b64=result["image_b64"],
-        content_type=result["content_type"],
-        model=result["model"],
-        model_key=request.model_key,
-        dry_run=False,
-    )

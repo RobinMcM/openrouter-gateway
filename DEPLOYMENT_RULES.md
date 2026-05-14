@@ -32,7 +32,7 @@ This repository serves the models API on `models.rapidmvp.io`.
 3. Auth endpoint over HTTPS:
    - `curl -H "X-Internal-API-Key: <KEY>" https://models.rapidmvp.io/api/instructions`
 4. Canary pass:
-   - execute + status + result flow succeeds.
+   - text execute, image generate, video generate, and task execute (dry_run) all succeed.
 
 ## Client Configuration Rule
 

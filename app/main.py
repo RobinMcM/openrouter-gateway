@@ -4,20 +4,19 @@ import uuid
 from typing import Optional
 from app.auth import verify_api_key, verify_admin_key
 from app.schemas import (
-    RouteRequest, RouteResponse, ExecuteRequest, ExecuteResponse,
+    RouteRequest, RouteResponse, ExecuteResponse,
     ErrorResponse, InstructionsResponse, EndpointInfo, LogsResponse,
-    ModelsResponse, ModelInfo,
     UpdateOpenRouterKeyRequest, TestOpenRouterKeyRequest,
     TestOpenRouterKeyResponse, OpenRouterKeyStatusResponse,
     SuccessResponse, ModelsShowcaseResponse, ShowcaseCategory, ShowcaseModel,
-    OpenRouterExecuteRequest, FalExecuteRequest, AsyncJobResponse, JobStatusResponse,
-    GenericExecuteRequest, GenericExecuteResponse,
+    OpenRouterExecuteRequest,
     ClassifyRequest, ClassifyResponse,
     ImageGenerateRequest, ImageGenerateResponse,
+    VideoGenerateRequest, VideoGenerateResponse,
+    TaskExecuteRequest, TaskExecuteResponse,
 )
-from app.models_data import OPENROUTER_MODELS
-from app.movieshaker_models_data import MOVIESHAKER_MODELS, CATEGORIES
-from app.openrouter_models_showcase import OPENROUTER_SHOWCASE, OPENROUTER_CATEGORIES
+from app.movieshaker_models_data import MOVIESHAKER_MODELS
+from app.openrouter_models_showcase import OPENROUTER_SHOWCASE
 from app.config_manager import (
     save_openrouter_key, is_key_configured, test_openrouter_key
 )
@@ -26,17 +25,12 @@ from app.config import ROUTING_CONFIG
 from app.providers.openrouter_client import (
     calculate_cost_estimate, call_openrouter, extract_actual_usage
 )
-# FAL gateway imports
-from app.providers import fal_client
-# OpenRouter synchronous image generation
 from app.providers.openrouter_image_client import generate_image_openrouter
+from app.providers.openrouter_video_client import generate_video_openrouter
 from app.image_models import OPENROUTER_IMAGE_MODELS, DEFAULT_IMAGE_MODEL
-from app.routing.media_routing import get_routing_for_media_type, is_model_allowed
-from app.pricing.media_pricing import calculate_cost_estimate as calculate_media_cost
-from app.pricing.media_pricing import extract_actual_usage as extract_media_usage
-from app.job_store.valkey_store import get_valkey_store
-from app.services.model_registry import get_dynamic_media_models
-from app.transforms.media_transformer import transform_generic_request
+from app.video_models import OPENROUTER_VIDEO_MODELS, DEFAULT_VIDEO_MODEL
+from app.tasks.task_registry import TASK_REGISTRY
+from app.tasks.task_router import resolve_task
 
 app = FastAPI(title="OpenRouter Gateway", version="1.0.0")
 
@@ -232,29 +226,6 @@ async def get_models(api_key: str = Depends(verify_api_key)):
         log_error(job_id, str(e))
         return ErrorResponse(message=f"Unexpected error: {str(e)}")
 
-
-@app.get("/api/media/models")
-async def get_media_models(
-    media_type: Optional[str] = Query(default=None),
-    query_type: Optional[str] = Query(default=None),
-    api_key: str = Depends(verify_api_key),
-):
-    """
-    List media-capable models for FAL usage.
-    Optional media_type filter supports: image-generation, image-to-video,
-    video-generation, audio-generation.
-    """
-    registry = get_dynamic_media_models(query_type=query_type, media_type=media_type)
-    rows = registry["models"]
-    return {
-        "status": "ok",
-        "models": rows,
-        "count": len(rows),
-        "media_type": media_type,
-        "query_type": query_type,
-        "fetched_at": registry.get("fetched_at"),
-        "cache_ttl_seconds": registry.get("cache_ttl_seconds"),
-    }
 
 
 @app.get("/api/models-showcase", response_model=ModelsShowcaseResponse)
@@ -1681,184 +1652,20 @@ async def route_request(
 
 @app.post("/api/execute")
 async def execute_request(
-    request: Request,  # Use FastAPI Request object
+    request: Request,
     api_key: str = Depends(verify_api_key)
 ):
-    """
-    Execute API call with provider routing (OpenRouter or FAL).
-    
-    Supports both:
-    - New format: discriminated union on 'provider' field
-    - Old format: no provider field (defaults to OpenRouter)
-    """
-    # Get the raw JSON body
+    """Execute an OpenRouter API call (text completion / generation)."""
     body = await request.json()
-    
-    # Generic contract path (final stabilization): query_type + model + options.
-    if "query_type" in body:
-        if "provider" not in body:
-            body["provider"] = "fal"
-        generic_request = GenericExecuteRequest(**body)
-        return await execute_generic_fal(generic_request)
-
-    # Legacy behavior: provider-discriminated execute contract.
     if "provider" not in body:
         body["provider"] = "openrouter"
-    
-    provider = body["provider"]
-    
-    if provider == "openrouter":
-        # Parse as OpenRouterExecuteRequest
-        openrouter_request = OpenRouterExecuteRequest(**body)
-        return await execute_openrouter(openrouter_request)
-    elif provider == "fal":
-        # Parse as FalExecuteRequest
-        fal_request = FalExecuteRequest(**body)
-        return await execute_fal(fal_request)
-    else:
-        return ErrorResponse(message=f"Unknown provider: {provider}")
-
-
-def _append_stage(job: dict, stage: str) -> list[str]:
-    history = list(job.get("stage_history") or [])
-    if not history or history[-1] != stage:
-        history.append(stage)
-    return history
-
-
-async def execute_generic_fal(request: GenericExecuteRequest) -> GenericExecuteResponse | ErrorResponse:
-    """
-    Generic media gateway contract:
-    - validate/transform generic request
-    - drop unsupported fields
-    - apply defaults
-    - submit to Fal through existing transport
-    """
-    job_id = str(uuid.uuid4())
-    log_request("execute_generic_fal", job_id)
-    stage_history = ["validated"]
-    destination_block = {
-        "target": (request.destination.target if request.destination else None),
-        "bucket": (request.destination.bucket if request.destination else None),
-        "path_prefix": (request.destination.path_prefix if request.destination else None),
-        "provider_output_urls": [],
-        "final_output_urls": [],
-    }
-    try:
-        media_type, transformed_payload, trace = transform_generic_request(
-            query_type=request.query_type,
-            model=request.model,
-            source_image=request.source_image,
-            options=request.options,
-        )
-        stage_history.append("transformed")
-        canonical_model = str(trace.get("canonical_model") or request.model).strip()
-        if not is_model_allowed(canonical_model):
-            return JSONResponse(
-                status_code=400,
-                content={"status": "error", "message": f"Model '{canonical_model}' not in allowlist"},
-            )
-
-        estimate = calculate_media_cost(canonical_model, transformed_payload)
-        provider_request = {
-            "provider": "fal",
-            "media_type": media_type,
-            "model": canonical_model,
-            "payload": transformed_payload,
-            "dry_run": request.dry_run,
-        }
-        if request.dry_run:
-            stage_history.append("completed")
-            return GenericExecuteResponse(
-                query_type=request.query_type,
-                model=request.model,
-                canonical_model=canonical_model,
-                media_type=media_type,
-                accepted_fields=trace.get("accepted_fields") or [],
-                defaulted_fields=trace.get("defaulted_fields") or {},
-                dropped_fields=trace.get("dropped_fields") or [],
-                provider_request=provider_request,
-                destination=destination_block,
-                stage="completed",
-                stage_history=stage_history,
-                job_id=job_id,
-                job_status="completed",
-                status_url=f"/api/status/{job_id}",
-                estimate=estimate,
-            )
-
-        valkey = await get_valkey_store()
-        await valkey.create_job(
-            job_id=job_id,
-            provider="fal",
-            media_type=media_type,
-            model=canonical_model,
-            payload=transformed_payload,
-            estimate=estimate,
-        )
-        await valkey.update_job(
-            job_id,
-            stage="transformed",
-            stage_history_json=stage_history,
-            query_type=request.query_type,
-            destination_json=destination_block,
-            transform_trace_json={
-                "accepted_fields": trace.get("accepted_fields") or [],
-                "defaulted_fields": trace.get("defaulted_fields") or {},
-                "dropped_fields": trace.get("dropped_fields") or [],
-                "provider_request": provider_request,
-            },
-        )
-
-        success, provider_request_id, error_msg = await fal_client.submit_queue(
-            model_id=canonical_model,
-            payload=transformed_payload,
-            webhook_url=request.webhook_url,
-        )
-        if not success:
-            stage_history.append("failed")
-            await valkey.update_job(
-                job_id,
-                status="failed",
-                stage="failed",
-                stage_history_json=stage_history,
-                error=error_msg,
-            )
-            return ErrorResponse(message=error_msg or "FAL submission failed")
-
-        stage_history.append("submitted")
-        await valkey.update_job(
-            job_id,
-            status="processing",
-            stage="submitted",
-            stage_history_json=stage_history,
-            provider_request_id=provider_request_id,
-        )
-        return GenericExecuteResponse(
-            query_type=request.query_type,
-            model=request.model,
-            canonical_model=canonical_model,
-            media_type=media_type,
-            accepted_fields=trace.get("accepted_fields") or [],
-            defaulted_fields=trace.get("defaulted_fields") or {},
-            dropped_fields=trace.get("dropped_fields") or [],
-            provider_request=provider_request,
-            destination=destination_block,
-            stage="submitted",
-            stage_history=stage_history,
-            job_id=job_id,
-            job_status="processing",
-            status_url=f"/api/status/{job_id}",
-            estimate=estimate,
-        )
-    except ValueError as e:
+    if body["provider"] != "openrouter":
         return JSONResponse(
-            status_code=422,
-            content={"status": "error", "message": str(e)},
+            status_code=400,
+            content={"status": "error", "message": f"Unknown provider: {body['provider']}"},
         )
-    except Exception as e:
-        log_error(job_id, str(e))
-        return ErrorResponse(message=f"Unexpected error: {str(e)}")
+    openrouter_request = OpenRouterExecuteRequest(**body)
+    return await execute_openrouter(openrouter_request)
 
 
 async def execute_openrouter(request: OpenRouterExecuteRequest) -> ExecuteResponse | ErrorResponse:
@@ -1916,347 +1723,6 @@ async def execute_openrouter(request: OpenRouterExecuteRequest) -> ExecuteRespon
         log_error(job_id, str(e))
         return ErrorResponse(message=f"Unexpected error: {str(e)}")
 
-
-async def execute_fal(request: FalExecuteRequest) -> AsyncJobResponse | ErrorResponse:
-    """
-    Handle FAL execution (async with job queue).
-    Returns job_id immediately, client polls /api/status/{job_id}.
-    """
-    job_id = str(uuid.uuid4())
-    log_request("execute_fal", job_id)
-    stage_history = ["validated"]
-    
-    try:
-        # Get routing for media_type with optional model override (Correction #9)
-        routing_config = get_routing_for_media_type(request.media_type, request.model)
-        
-        if not routing_config:
-            if request.model and not is_model_allowed(request.model):
-                log_error(job_id, f"Model not allowed: {request.model}")
-                return ErrorResponse(message=f"Model '{request.model}' not in allowlist")
-            log_error(job_id, f"Unknown media_type: {request.media_type}")
-            return ErrorResponse(message=f"Unknown media_type: {request.media_type}")
-        
-        model = routing_config["model"]
-        mode = routing_config.get("mode", "queue")
-        stage_history.append("transformed")
-        
-        # Calculate cost estimate
-        estimate = calculate_media_cost(model, request.payload)
-        
-        # Dry run - return estimate only
-        if request.dry_run:
-            log_success(job_id, f"dry_run=true media_type={request.media_type} model={model}")
-            return AsyncJobResponse(
-                ok=True,
-                job_id=job_id,
-                job_status="completed",
-                status_url=f"/api/status/{job_id}",
-                estimate=estimate
-            )
-        
-        # Create job in Valkey
-        valkey = await get_valkey_store()
-        await valkey.create_job(
-            job_id=job_id,
-            provider="fal",
-            media_type=request.media_type,
-            model=model,
-            payload=request.payload,
-            estimate=estimate
-        )
-        await valkey.update_job(
-            job_id,
-            stage="transformed",
-            stage_history_json=stage_history,
-        )
-        
-        # Submit to FAL (queue mode)
-        success, provider_request_id, error_msg = await fal_client.submit_queue(
-            model_id=model,
-            payload=request.payload,
-            webhook_url=request.webhook_url
-        )
-        
-        if not success:
-            stage_history.append("failed")
-            await valkey.update_job(job_id, status="failed", error=error_msg)
-            await valkey.update_job(job_id, stage="failed", stage_history_json=stage_history)
-            log_error(job_id, error_msg or "FAL submission failed")
-            return ErrorResponse(message=error_msg or "FAL submission failed")
-        
-        # Update job with provider request ID
-        stage_history.append("submitted")
-        await valkey.update_job(
-            job_id,
-            status="processing",
-            provider_request_id=provider_request_id,
-            stage="submitted",
-            stage_history_json=stage_history,
-        )
-        
-        log_success(job_id, f"media_type={request.media_type} model={model} provider_request_id={provider_request_id}")
-        
-        return AsyncJobResponse(
-            ok=True,
-            job_id=job_id,
-            job_status="processing",
-            status_url=f"/api/status/{job_id}",
-            estimate=estimate
-        )
-    
-    except Exception as e:
-        log_error(job_id, str(e))
-        return ErrorResponse(message=f"Unexpected error: {str(e)}")
-
-
-@app.get("/api/status/{job_id}", response_model=JobStatusResponse | ErrorResponse)
-async def get_job_status(
-    job_id: str,
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Get status of FAL job.
-    
-    Correction #4: Transient errors don't fail the job, only terminal states do.
-    
-    Returns:
-    - queued: Job submitted but not started
-    - processing: Job in progress
-    - completed: Job done, result available
-    - failed: Job failed (terminal error only)
-    """
-    log_request("status", job_id)
-    
-    try:
-        valkey = await get_valkey_store()
-        job = await valkey.get_job(job_id)
-        
-        if not job:
-            log_error(job_id, "Job not found")
-            return ErrorResponse(message=f"Job {job_id} not found")
-        
-        current_status = job.get("status")
-        
-        # If already completed or failed, return cached result
-        if current_status in ["completed", "failed"]:
-            log_success(job_id, f"status={current_status} (cached)")
-            stage_history = list(job.get("stage_history") or [])
-            return JobStatusResponse(
-                ok=(current_status == "completed"),
-                job_id=job_id,
-                job_status=current_status,
-                result=job.get("result"),
-                usage=job.get("estimate"),  # Or actual usage if available
-                error=job.get("error"),
-                stage=job.get("stage"),
-                stage_history=stage_history,
-                destination=job.get("destination"),
-            )
-        
-        # Job still processing - check FAL status
-        # Correction #3: Acquire lock to prevent concurrent status checks
-        lock_acquired = await valkey.acquire_lock(job_id, timeout_seconds=10)
-        
-        if not lock_acquired:
-            # Another request is checking status, return current state
-            log_success(job_id, f"status={current_status} (locked)")
-            return JobStatusResponse(
-                ok=True,
-                job_id=job_id,
-                job_status=current_status,
-                provider_status=None,
-                warning="Status check in progress by another request",
-                stage=job.get("stage"),
-                stage_history=list(job.get("stage_history") or []),
-                destination=job.get("destination"),
-            )
-        
-        # Check FAL status
-        provider_request_id = job.get("provider_request_id")
-        model = job.get("model")
-        
-        if not provider_request_id or not model:
-            log_error(job_id, "Missing provider_request_id or model")
-            return ErrorResponse(message="Invalid job state")
-        
-        # Correction #4: Transient errors should not fail the job
-        success, status_data, error_msg = await fal_client.get_queue_status(
-            model, provider_request_id, job_id=job_id
-        )
-        
-        if not success:
-            # Transient error - keep job as processing, return warning
-            log_error(job_id, f"Transient status error: {error_msg}")
-            stage_history = _append_stage(job, "provider_processing")
-            await valkey.update_job(job_id, stage="provider_processing", stage_history_json=stage_history)
-            return JobStatusResponse(
-                ok=True,
-                job_id=job_id,
-                job_status="processing",
-                provider_status=None,
-                warning=f"Transient error checking status: {error_msg}",
-                stage="provider_processing",
-                stage_history=stage_history,
-                destination=job.get("destination"),
-            )
-        
-        fal_status = status_data.get("status", "UNKNOWN")
-        
-        # Job still queued or in progress
-        if fal_status in ["IN_QUEUE", "IN_PROGRESS"]:
-            log_success(job_id, f"fal_status={fal_status}")
-            stage_history = _append_stage(job, "provider_processing")
-            await valkey.update_job(job_id, stage="provider_processing", stage_history_json=stage_history)
-            return JobStatusResponse(
-                ok=True,
-                job_id=job_id,
-                job_status="processing",
-                provider_status=status_data,
-                stage="provider_processing",
-                stage_history=stage_history,
-                destination=job.get("destination"),
-            )
-        
-        # Job completed - fetch result
-        if fal_status == "COMPLETED":
-            response_url = status_data.get("response_url")
-            
-            if not response_url:
-                log_error(job_id, "No response_url in completed status")
-                await valkey.update_job(job_id, status="failed", error="No response_url from FAL")
-                stage_history = _append_stage(job, "failed")
-                await valkey.update_job(job_id, stage="failed", stage_history_json=stage_history)
-                return ErrorResponse(message="FAL returned COMPLETED but no response_url")
-            
-            # Fetch result (Correction #5: validates host and includes auth)
-            success, result_data, error_msg = await fal_client.fetch_queue_result(response_url)
-            
-            if not success:
-                log_error(job_id, f"Failed to fetch result: {error_msg}")
-                await valkey.update_job(job_id, status="failed", error=error_msg)
-                stage_history = _append_stage(job, "failed")
-                await valkey.update_job(job_id, stage="failed", stage_history_json=stage_history)
-                return ErrorResponse(message=f"Failed to fetch result: {error_msg}")
-            
-            # Parse result (Correction #8: handles multiple formats)
-            parsed_result = fal_client.parse_fal_result(result_data)
-            provider_output_urls = []
-            if isinstance(parsed_result, dict):
-                if isinstance(parsed_result.get("video_url"), str):
-                    provider_output_urls.append(parsed_result["video_url"])
-                if isinstance(parsed_result.get("image_url"), str):
-                    provider_output_urls.append(parsed_result["image_url"])
-                for item in (parsed_result.get("files") or []):
-                    if isinstance(item, dict) and isinstance(item.get("url"), str):
-                        provider_output_urls.append(item["url"])
-            destination = dict(job.get("destination") or {})
-            destination.setdefault("provider_output_urls", provider_output_urls)
-            destination.setdefault("final_output_urls", destination.get("final_output_urls") or provider_output_urls)
-            
-            # Calculate actual usage
-            payload = job.get("payload", {})
-            usage = extract_media_usage(result_data, model, payload)
-            
-            # Store result in Valkey
-            await valkey.update_job(
-                job_id,
-                status="completed",
-                result_json=parsed_result,
-                estimate_json=usage,
-                destination_json=destination,
-            )
-            stage_history = _append_stage(job, "provider_completed")
-            stage_history = _append_stage({"stage_history": stage_history}, "result_parsed")
-            await valkey.update_job(job_id, stage="result_parsed", stage_history_json=stage_history)
-            
-            log_success(job_id, f"status=completed files={len(parsed_result.get('files', []))}")
-            
-            return JobStatusResponse(
-                ok=True,
-                job_id=job_id,
-                job_status="completed",
-                result=parsed_result,
-                usage=usage,
-                stage="result_parsed",
-                stage_history=stage_history,
-                destination=destination,
-            )
-        
-        # Job failed (terminal failure from FAL)
-        else:
-            error_detail = status_data.get("error", f"FAL status: {fal_status}")
-            await valkey.update_job(job_id, status="failed", error=error_detail)
-            stage_history = _append_stage(job, "failed")
-            await valkey.update_job(job_id, stage="failed", stage_history_json=stage_history)
-            log_error(job_id, f"FAL job failed: {error_detail}")
-            
-            return JobStatusResponse(
-                ok=False,
-                job_id=job_id,
-                job_status="failed",
-                error=error_detail,
-                stage="failed",
-                stage_history=stage_history,
-                destination=job.get("destination"),
-            )
-    
-    except Exception as e:
-        log_error(job_id, f"Unexpected error: {str(e)}")
-        return ErrorResponse(message=f"Unexpected error: {str(e)}")
-
-
-@app.get("/api/result/{job_id}")
-async def get_job_result(
-    job_id: str,
-    api_key: str = Depends(verify_api_key),
-):
-    """
-    Return result payload for a previously submitted async job.
-    Keeps compatibility with clients that probe /api/result/{job_id}.
-    """
-    valkey = await get_valkey_store()
-    job = await valkey.get_job(job_id)
-    if not job:
-        return ErrorResponse(message=f"Job {job_id} not found")
-    result_payload = job.get("result") or {}
-    provider_output_urls = []
-    if isinstance(result_payload, dict):
-        if isinstance(result_payload.get("video_url"), str):
-            provider_output_urls.append(result_payload["video_url"])
-        if isinstance(result_payload.get("image_url"), str):
-            provider_output_urls.append(result_payload["image_url"])
-        for item in (result_payload.get("files") or []):
-            if isinstance(item, dict) and isinstance(item.get("url"), str):
-                provider_output_urls.append(item["url"])
-    destination = dict(job.get("destination") or {})
-    destination.setdefault("provider_output_urls", provider_output_urls)
-    destination.setdefault("final_output_urls", destination.get("final_output_urls") or provider_output_urls)
-    return {
-        "status": "ok",
-        "ok": job.get("status") == "completed",
-        "job_id": job_id,
-        "job_status": job.get("status"),
-        "result": result_payload,
-        "usage": job.get("estimate"),
-        "error": job.get("error"),
-        "stage": job.get("stage"),
-        "stage_history": job.get("stage_history") or [],
-        "accepted_fields": (job.get("transform_trace") or {}).get("accepted_fields") or [],
-        "defaulted_fields": (job.get("transform_trace") or {}).get("defaulted_fields") or {},
-        "dropped_fields": (job.get("transform_trace") or {}).get("dropped_fields") or [],
-        "provider_request": (job.get("transform_trace") or {}).get("provider_request") or {},
-        "destination": destination,
-    }
-
-
-@app.get("/api/results/{job_id}")
-async def get_job_results_alias(
-    job_id: str,
-    api_key: str = Depends(verify_api_key),
-):
-    """Alias for /api/result/{job_id}."""
-    return await get_job_result(job_id=job_id, api_key=api_key)
 
 
 _CLASSIFY_CONTEXT_MODE_MAP = {
@@ -2441,6 +1907,156 @@ def image_generate(
     except Exception as exc:
         import traceback
         print(f"IMAGE GENERATE ERROR: {exc}")
+        print(traceback.format_exc())
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "message": str(exc)},
+        )
+
+
+# ─── OpenRouter synchronous video generation ──────────────────────────────────
+
+@app.get("/api/video/models")
+def list_video_models(api_key: str = Depends(verify_api_key)):
+    """
+    List available OpenRouter video models with metadata.
+    Returns the full catalogue with model_key included in each entry.
+    """
+    models = [
+        {"model_key": key, **meta}
+        for key, meta in OPENROUTER_VIDEO_MODELS.items()
+    ]
+    return {
+        "status": "ok",
+        "models": models,
+        "count": len(models),
+        "default": DEFAULT_VIDEO_MODEL,
+    }
+
+
+@app.post("/api/video/generate")
+def video_generate(
+    request: VideoGenerateRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    model_entry = OPENROUTER_VIDEO_MODELS.get(request.model_key)
+    if not model_entry:
+        valid_keys = ", ".join(sorted(OPENROUTER_VIDEO_MODELS.keys()))
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Unknown model_key. Valid: {valid_keys}"},
+        )
+
+    model_id = model_entry["model_id"]
+
+    if request.dry_run:
+        return {"ok": True, "video_url": None, "content_type": "video/mp4",
+                "model": model_id, "model_key": request.model_key, "dry_run": True}
+
+    try:
+        result = generate_video_openrouter(
+            prompt=request.prompt,
+            model=model_id,
+            source_image=request.source_image,
+            duration=request.duration,
+            aspect_ratio=request.aspect_ratio,
+        )
+        return {
+            "ok": True,
+            "video_url": result["video_url"],
+            "content_type": result["content_type"],
+            "model": result["model"],
+            "model_key": request.model_key,
+            "dry_run": False,
+        }
+    except Exception as exc:
+        import traceback
+        print(f"VIDEO GENERATE ERROR: {exc}")
+        print(traceback.format_exc())
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "message": str(exc)},
+        )
+
+
+# ─── Task dispatch ─────────────────────────────────────────────────────────────
+
+@app.get("/api/tasks")
+def list_tasks(api_key: str = Depends(verify_api_key)):
+    """
+    List all registered tasks with their resolved model and availability.
+    """
+    tasks = []
+    for task_name, task_def in TASK_REGISTRY.items():
+        resolved = resolve_task(task_name)
+        tasks.append({
+            "task": task_name,
+            "description": task_def.description,
+            "endpoint": task_def.endpoint,
+            "available": resolved is not None,
+            "resolved_model": resolved[1] if resolved else None,
+            "model_priority": task_def.models,
+        })
+    return {"status": "ok", "tasks": tasks}
+
+
+@app.post("/api/task/execute")
+def task_execute(
+    request: TaskExecuteRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    resolved = resolve_task(request.task)
+    if resolved is None:
+        valid_tasks = ", ".join(sorted(TASK_REGISTRY.keys()))
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Unknown or unavailable task. Valid: {valid_tasks}"},
+        )
+
+    task_def, model_key = resolved
+
+    if request.dry_run:
+        return {
+            "ok": True,
+            "task": request.task,
+            "resolved_model": model_key,
+            "endpoint": task_def.endpoint,
+            "dry_run": True,
+            "result": None,
+        }
+
+    # Merge task defaults with caller-supplied options
+    options = {**task_def.default_options, **request.options}
+
+    try:
+        if task_def.endpoint == "video":
+            model_entry = OPENROUTER_VIDEO_MODELS[model_key]
+            result = generate_video_openrouter(
+                prompt=request.prompt or "",
+                model=model_entry["model_id"],
+                source_image=request.source,
+                duration=int(options.get("duration", 5)),
+                aspect_ratio=str(options.get("aspect_ratio", "16:9")),
+            )
+        else:
+            model_entry = OPENROUTER_IMAGE_MODELS[model_key]
+            result = generate_image_openrouter(
+                prompt=request.prompt or "",
+                model=model_entry["model_id"],
+                aspect_ratio=str(options.get("aspect_ratio", "1:1")),
+            )
+
+        return {
+            "ok": True,
+            "task": request.task,
+            "resolved_model": model_key,
+            "endpoint": task_def.endpoint,
+            "dry_run": False,
+            "result": result,
+        }
+    except Exception as exc:
+        import traceback
+        print(f"TASK EXECUTE ERROR [{request.task}]: {exc}")
         print(traceback.format_exc())
         return JSONResponse(
             status_code=502,

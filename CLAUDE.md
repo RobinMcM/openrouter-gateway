@@ -1,19 +1,16 @@
 # CLAUDE.md — openrouter-gateway
 
 ## Service Identity
-Stateless AI execution gateway. Passes requests to OpenRouter (text) or FAL.ai
-(media) and returns results with cost information.
+Stateless AI execution gateway. Passes requests to OpenRouter (text, image,
+video) and returns results with cost information.
 
 **The gateway does not track billing or attribute costs to users.**
 Cost tracking is the responsibility of the calling service (MovieShakerV2 engine).
-The gateway uses Valkey only for in-flight async job state (FAL media jobs) —
-this is transient state, not persistent billing data.
 
 - **Language**: Python 3.11
 - **Framework**: FastAPI + Pydantic
-- **HTTP Client**: httpx (async)
-- **Providers**: OpenRouter (text), FAL.ai (image/video/audio)
-- **Job State**: Valkey (async FAL jobs only — transient)
+- **HTTP Client**: httpx (sync for image/video, async for text)
+- **Providers**: OpenRouter only (text, synchronous image, synchronous video)
 - **Auth**: `X-Internal-API-Key` header via `hmac.compare_digest`
 - **CORS**: Handled by Nginx — not in FastAPI
 - **Deployed at**: `https://models.rapidmvp.io` (DigitalOcean Droplet)
@@ -22,33 +19,29 @@ this is transient state, not persistent billing data.
 ## Structure
 ```
 app/
-  main.py                    ← entry point, all route registrations
-  auth.py                    ← API key verification (hmac.compare_digest)
-  config.py                  ← routing + pricing config loading
-  config_manager.py          ← runtime OpenRouter key management
-  logger.py                  ← structured logging with secret sanitisation
-  models_data.py             ← OpenRouter model list
-  movieshaker_models_data.py ← MovieShaker-specific model catalog
+  main.py                       ← entry point, all route registrations
+  auth.py                       ← API key verification (hmac.compare_digest)
+  config.py                     ← routing + pricing config loading
+  config_manager.py             ← runtime OpenRouter key management
+  logger.py                     ← structured logging with secret sanitisation
+  image_models.py               ← OpenRouter image model catalogue
+  video_models.py               ← OpenRouter video model catalogue
+  models_data.py                ← OpenRouter text model list
+  movieshaker_models_data.py    ← MovieShaker-specific model catalog
   openrouter_models_showcase.py ← model showcase data
-  schemas.py                 ← all Pydantic request/response models
+  schemas.py                    ← all Pydantic request/response models
   providers/
-    openrouter_client.py     ← OpenRouter API client
-    fal_client.py            ← FAL.ai API client (sync + queue)
-  routing/
-    media_routing.py         ← FAL media type → model routing
-  pricing/
-    media_pricing.py         ← FAL cost estimation and extraction
-  job_store/
-    valkey_store.py          ← transient async job state (FAL only)
-  services/
-    model_registry.py        ← dynamic model list from FAL
-  transforms/
-    media_transformer.py     ← generic request → provider-specific format
+    openrouter_client.py        ← OpenRouter text API client
+    openrouter_image_client.py  ← OpenRouter synchronous image client
+    openrouter_video_client.py  ← OpenRouter synchronous video client
+  tasks/
+    task_registry.py            ← task catalogue (task name → ranked models)
+    task_router.py              ← resolve_task() — picks best available model
 nginx/
   conf.d/
-    models.rapidmvp.io.conf  ← HTTPS + CORS config
+    models.rapidmvp.io.conf     ← HTTPS + CORS config
 scripts/
-  run_canary.py              ← gated health + smoke test runner
+  run_canary.py                 ← gated health + smoke test runner
 ```
 
 ## Rules — Read Before Every Task
@@ -75,7 +68,7 @@ scripts/
 - Requires `.env` with `GATEWAY_BASE_URL`, `GATEWAY_INTERNAL_API_KEY`
 
 ### Security — Critical
-- NEVER log or expose `INTERNAL_API_KEY`, `OPENROUTER_API_KEY`, or `FAL_KEY`
+- NEVER log or expose `INTERNAL_API_KEY` or `OPENROUTER_API_KEY`
 - All `/api/*` endpoints require `X-Internal-API-Key`
 - `/api/logs` requires `ADMIN_API_KEY` if set, otherwise `INTERNAL_API_KEY`
 - Only `/health` is unauthenticated
@@ -86,6 +79,9 @@ scripts/
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness check |
+| GET | `/models` | HTML: OpenRouter model showcase page |
+| GET | `/models-showcase` | HTML: MovieShaker AI tools showcase page |
+| GET | `/config` | HTML: Owner config page |
 
 ### Authenticated (`X-Internal-API-Key`)
 | Method | Path | Description |
@@ -93,25 +89,27 @@ scripts/
 | GET | `/api/instructions` | Full API documentation |
 | GET | `/api/logs` | Sanitised logs (admin only) |
 | POST | `/api/route` | Cost estimate only — no provider call |
-| POST | `/api/execute` | OpenRouter text OR FAL media (discriminated by `provider` field) |
-| POST | `/api/media/execute` | Generic media execute (new contract) |
-| GET | `/api/models` | OpenRouter model list |
-| GET | `/api/media/models` | FAL media model list (filterable by `media_type`) |
-| GET | `/api/models/showcase` | MovieShaker model showcase |
-| GET | `/api/status/{job_id}` | FAL async job status |
-| GET | `/api/result/{job_id}` | FAL async job result |
-| GET | `/api/results/{job_id}` | Alias for `/api/result/{job_id}` |
+| POST | `/api/execute` | OpenRouter text completion |
+| GET | `/api/models` | OpenRouter text model list |
+| GET | `/api/models-showcase` | MovieShaker model showcase (JSON) |
+| GET | `/api/image/models` | OpenRouter image model catalogue |
+| POST | `/api/image/generate` | OpenRouter synchronous image generation (base64) |
+| GET | `/api/video/models` | OpenRouter video model catalogue |
+| POST | `/api/video/generate` | OpenRouter synchronous video generation (URL) |
+| GET | `/api/tasks` | Task catalogue with resolved models |
+| POST | `/api/task/execute` | Resolve task → model → dispatch |
+| POST | `/api/classify` | Classify user message to MovieShaker agent |
 
 ### Admin only
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/config/openrouter-key/status` | OpenRouter key config status |
 | POST | `/api/config/openrouter-key` | Update OpenRouter key at runtime |
-| POST | `/api/config/openrouter-key/test` | Test an OpenRouter key |
+| POST | `/api/config/test-openrouter-key` | Test an OpenRouter key |
 
 ## Provider Contracts
 
-### OpenRouter (text)
+### OpenRouter text
 ```
 POST /api/execute
 {
@@ -122,46 +120,55 @@ POST /api/execute
 }
 → { status, routing, result, usage }
 ```
-Synchronous. Returns immediately with result and cost.
 
-### FAL.ai (media — legacy)
+### OpenRouter image
 ```
-POST /api/execute
+POST /api/image/generate
 {
-  "provider": "fal",
-  "media_type": "image-generation",
-  "model": "fal-ai/flux/schnell",
-  "payload": { "prompt": "..." },
+  "model_key": "nano-banana",
+  "prompt": "...",
+  "aspect_ratio": "16:9",
   "dry_run": false
 }
-→ { ok, job_id, job_status, status_url, estimate }
+→ { ok, image_b64, content_type, model, model_key, dry_run }
 ```
-Asynchronous. Poll `/api/status/{job_id}` until `job_status` is `completed` or `failed`.
 
-### FAL.ai (media — generic contract)
+### OpenRouter video
 ```
-POST /api/media/execute
+POST /api/video/generate
 {
-  "provider": "fal",
-  "query_type": "image-video",
-  "model": "fal-ai/veo3/image-to-video",
-  "source_image": "https://...",
-  "options": { "duration": "6s" },
+  "model_key": "kling-v3-pro",
+  "prompt": "...",
+  "source_image": "https://...",   # optional (image-to-video)
+  "duration": 5,
+  "aspect_ratio": "16:9",
   "dry_run": false
 }
-→ GenericExecuteResponse (normalised fields, stage history, cost)
+→ { ok, video_url, content_type, model, model_key, dry_run }
 ```
+
+### Task execute
+```
+POST /api/task/execute
+{
+  "task": "generate-shot",
+  "source": "https://...",         # optional source image
+  "prompt": "...",
+  "options": { "duration": 5 },
+  "dry_run": false
+}
+→ { ok, task, resolved_model, endpoint, dry_run, result }
+```
+Task registry: `app/tasks/task_registry.py`
+Resolver: `app/tasks/task_router.py`
 
 ## Environment Variables
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `INTERNAL_API_KEY` | ✅ | Auth key for all `/api/*` endpoints |
 | `OPENROUTER_API_KEY` | ✅ | OpenRouter API key |
-| `FAL_KEY` | ✅ | FAL.ai API key |
 | `ADMIN_API_KEY` | | Admin-only endpoints (logs, config) |
 | `OPENROUTER_BASE_URL` | | Default: `https://openrouter.ai/api/v1` |
-| `FAL_SYNC_BASE` | | Default: `https://fal.run` |
-| `FAL_QUEUE_BASE` | | Default: `https://queue.fal.run` |
 | `ADMIN_MARKUP_PERCENT` | | Default: `0.10` |
 | `ADMIN_FIXED_FEE` | | Default: `0.001` |
 | `ROUTING_CONFIG_JSON` | | Override routing config inline |

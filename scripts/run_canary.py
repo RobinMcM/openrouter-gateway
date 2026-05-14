@@ -63,7 +63,7 @@ def api_call(
 def wait_until_ready(base: str, api_key: str, timeout: int, max_wait_seconds: int = 300) -> None:
     started = time.time()
     while True:
-        health_code, health = api_call(base, "/health", timeout, method="GET", api_key=None)
+        health_code, _ = api_call(base, "/health", timeout, method="GET", api_key=None)
         auth_code, auth = api_call(base, "/api/instructions", timeout, method="GET", api_key=api_key)
         if health_code == 200 and auth_code == 200 and auth.get("status") == "ok":
             print("READY: gateway health and auth are both OK")
@@ -96,59 +96,77 @@ def main() -> int:
     if code != 200:
         return 1
 
-    # 2) models query
-    code, data = api_call(base, "/api/media/models?query_type=image-video", timeout, api_key=api_key)
-    print("STEP media-models:", code, "count=", data.get("count"))
+    # 2) image model catalogue
+    code, data = api_call(base, "/api/image/models", timeout, api_key=api_key)
+    print("STEP image-models:", code, "count=", data.get("count"))
     if code != 200 or not isinstance(data.get("models"), list):
         return 1
 
-    # 3) submit generic request with unknown field (must be dropped)
+    # 3) video model catalogue
+    code, data = api_call(base, "/api/video/models", timeout, api_key=api_key)
+    print("STEP video-models:", code, "count=", data.get("count"))
+    if code != 200 or not isinstance(data.get("models"), list):
+        return 1
+
+    # 4) task list
+    code, data = api_call(base, "/api/tasks", timeout, api_key=api_key)
+    print("STEP tasks:", code, "count=", len(data.get("tasks", [])))
+    if code != 200 or not isinstance(data.get("tasks"), list):
+        return 1
+
+    # 5) text execute (dry_run)
     execute_payload = {
-        "query_type": "text-image",
-        "model": "fal-ai/flux/schnell",
-        "options": {
-            "prompt": "A dramatic sci-fi landscape with a single ship",
-            "aspect_ratio": "16:9",
-            "unknown_extra_field": "drop-me",
+        "provider": "openrouter",
+        "job_type": "text-completion",
+        "payload": {
+            "model": "openai/gpt-4.1-mini",
+            "messages": [{"role": "user", "content": "Say hello in one word."}],
         },
-        "destination": {
-            "target": "digitalocean-spaces",
-            "bucket": "movieshaker-indie",
-            "path_prefix": "canary/gateway-final-phase",
-        },
-        "dry_run": False,
+        "dry_run": True,
     }
     code, data = api_call(base, "/api/execute", timeout, method="POST", body=execute_payload, api_key=api_key)
-    print("STEP execute:", code, data.get("job_status"), "stage=", data.get("stage"))
-    job_id = data.get("job_id")
-    if code != 200 or not job_id:
+    print("STEP text-execute:", code, data.get("status"))
+    if code != 200:
         return 1
 
-    # 4) poll status
-    terminal = {"completed", "failed"}
-    status_payload: Dict[str, Any] = {}
-    for _ in range(90):
-        code, status_payload = api_call(base, f"/api/status/{job_id}", timeout, api_key=api_key)
-        job_status = status_payload.get("job_status")
-        print("STEP status:", code, job_status, "stage=", status_payload.get("stage"))
-        if job_status in terminal:
-            break
-        time.sleep(2)
-
-    # 5) result
-    code, result_payload = api_call(base, f"/api/result/{job_id}", timeout, api_key=api_key)
-    print("STEP result:", code, result_payload.get("job_status"), "stage=", result_payload.get("stage"))
-    print(
-        "TRACE:",
-        {
-            "accepted_fields": result_payload.get("accepted_fields"),
-            "dropped_fields": result_payload.get("dropped_fields"),
-            "stage_history": result_payload.get("stage_history"),
-        },
-    )
-
-    if code != 200 or result_payload.get("job_status") != "completed":
+    # 6) image generate (dry_run)
+    image_payload = {
+        "model_key": "nano-banana",
+        "prompt": "A dramatic sci-fi landscape",
+        "aspect_ratio": "16:9",
+        "dry_run": True,
+    }
+    code, data = api_call(base, "/api/image/generate", timeout, method="POST", body=image_payload, api_key=api_key)
+    print("STEP image-generate (dry_run):", code, data.get("ok"))
+    if code != 200 or not data.get("ok"):
         return 1
+
+    # 7) video generate (dry_run)
+    video_payload = {
+        "model_key": "kling-v3-pro",
+        "prompt": "Cinematic tracking shot through a forest",
+        "duration": 5,
+        "aspect_ratio": "16:9",
+        "dry_run": True,
+    }
+    code, data = api_call(base, "/api/video/generate", timeout, method="POST", body=video_payload, api_key=api_key)
+    print("STEP video-generate (dry_run):", code, data.get("ok"))
+    if code != 200 or not data.get("ok"):
+        return 1
+
+    # 8) task execute (dry_run)
+    task_payload = {
+        "task": "generate-shot",
+        "prompt": "Camera slowly pushes forward",
+        "options": {"duration": 5, "aspect_ratio": "16:9"},
+        "dry_run": True,
+    }
+    code, data = api_call(base, "/api/task/execute", timeout, method="POST", body=task_payload, api_key=api_key)
+    print("STEP task-execute (dry_run):", code, data.get("ok"), "model=", data.get("resolved_model"))
+    if code != 200 or not data.get("ok"):
+        return 1
+
+    print("\nAll canary steps passed.")
     return 0
 
 

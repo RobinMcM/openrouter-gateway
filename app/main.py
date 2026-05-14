@@ -14,7 +14,11 @@ from app.schemas import (
     ImageGenerateRequest, ImageGenerateResponse,
     VideoGenerateRequest, VideoGenerateResponse,
     TaskExecuteRequest, TaskExecuteResponse,
+    TeamRouteRequest, TeamRouteResponse,
+    TeamExecuteRequest, TeamExecuteResponse,
 )
+from app.teams.team_registry import TEAM_REGISTRY
+from app.teams.team_router import resolve_team_task
 from app.movieshaker_models_data import MOVIESHAKER_MODELS
 from app.openrouter_models_showcase import OPENROUTER_SHOWCASE
 from app.config_manager import (
@@ -2001,7 +2005,7 @@ def list_tasks(api_key: str = Depends(verify_api_key)):
 
 
 @app.post("/api/task/execute")
-def task_execute(
+async def task_execute(
     request: TaskExecuteRequest,
     api_key: str = Depends(verify_api_key),
 ):
@@ -2038,13 +2042,29 @@ def task_execute(
                 duration=int(options.get("duration", 5)),
                 aspect_ratio=str(options.get("aspect_ratio", "16:9")),
             )
-        else:
+        elif task_def.endpoint == "image":
             model_entry = OPENROUTER_IMAGE_MODELS[model_key]
             result = generate_image_openrouter(
                 prompt=request.prompt or "",
                 model=model_entry["model_id"],
                 aspect_ratio=str(options.get("aspect_ratio", "1:1")),
             )
+        else:  # text
+            messages = request.options.get("messages") or []
+            if not messages and request.prompt:
+                messages = [{"role": "user", "content": request.prompt}]
+            payload = {
+                "model": model_key,
+                "messages": messages,
+                **{k: v for k, v in options.items() if k != "messages"},
+            }
+            success, response_data, error_msg = await call_openrouter("/chat/completions", payload)
+            if not success:
+                return JSONResponse(
+                    status_code=502,
+                    content={"status": "error", "message": error_msg or "Text generation failed"},
+                )
+            result = response_data
 
         return {
             "ok": True,
@@ -2057,6 +2077,158 @@ def task_execute(
     except Exception as exc:
         import traceback
         print(f"TASK EXECUTE ERROR [{request.task}]: {exc}")
+        print(traceback.format_exc())
+        return JSONResponse(
+            status_code=502,
+            content={"status": "error", "message": str(exc)},
+        )
+
+
+# ─── Team routing ─────────────────────────────────────────────────────────────
+
+@app.get("/api/teams")
+def list_teams(api_key: str = Depends(verify_api_key)):
+    """
+    List all registered teams with their capabilities, tasks, and model preferences.
+    """
+    teams = []
+    for team_name, team_def in TEAM_REGISTRY.items():
+        teams.append({
+            "team": team_name,
+            "display_name": team_def.display_name,
+            "description": team_def.description,
+            "capabilities": team_def.capabilities,
+            "tasks": team_def.tasks,
+            "text_models": team_def.text_models,
+            "image_models": team_def.image_models,
+            "video_models": team_def.video_models,
+            "fallback_team": team_def.fallback_team,
+        })
+    return {"status": "ok", "teams": teams, "count": len(teams)}
+
+
+@app.post("/api/team/route", response_model=TeamRouteResponse | ErrorResponse)
+def team_route(
+    request: TeamRouteRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Resolve (team, task) to a model without executing.
+    Walks the fallback chain if the primary team cannot resolve the task.
+    """
+    if request.team not in TEAM_REGISTRY:
+        valid = ", ".join(sorted(TEAM_REGISTRY.keys()))
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Unknown team. Valid: {valid}"},
+        )
+
+    resolved = resolve_team_task(request.team, request.task)
+    if resolved is None:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": f"Task '{request.task}' could not be resolved for team '{request.team}' or its fallback chain",
+            },
+        )
+
+    team_def, task_def, model = resolved
+    return TeamRouteResponse(
+        ok=True,
+        team=team_def.name,
+        team_display_name=team_def.display_name,
+        task=request.task,
+        resolved_model=model,
+        endpoint=task_def.endpoint,
+    )
+
+
+@app.post("/api/team/execute")
+async def team_execute(
+    request: TeamExecuteRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Resolve (team, task) and execute. Walks fallback chain on resolution failure.
+    """
+    if request.team not in TEAM_REGISTRY:
+        valid = ", ".join(sorted(TEAM_REGISTRY.keys()))
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Unknown team. Valid: {valid}"},
+        )
+
+    resolved = resolve_team_task(request.team, request.task)
+    if resolved is None:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": f"Task '{request.task}' could not be resolved for team '{request.team}' or its fallback chain",
+            },
+        )
+
+    team_def, task_def, model = resolved
+    options = {**task_def.default_options, **request.options}
+
+    if request.dry_run:
+        return {
+            "ok": True,
+            "team": team_def.name,
+            "task": request.task,
+            "resolved_model": model,
+            "endpoint": task_def.endpoint,
+            "dry_run": True,
+            "result": None,
+        }
+
+    try:
+        if task_def.endpoint == "video":
+            model_entry = OPENROUTER_VIDEO_MODELS[model]
+            result = generate_video_openrouter(
+                prompt=request.prompt or "",
+                model=model_entry["model_id"],
+                source_image=request.source,
+                duration=int(options.get("duration", 5)),
+                aspect_ratio=str(options.get("aspect_ratio", "16:9")),
+            )
+        elif task_def.endpoint == "image":
+            model_entry = OPENROUTER_IMAGE_MODELS[model]
+            result = generate_image_openrouter(
+                prompt=request.prompt or "",
+                model=model_entry["model_id"],
+                aspect_ratio=str(options.get("aspect_ratio", "1:1")),
+            )
+        else:  # text
+            messages = request.messages or []
+            if not messages and request.prompt:
+                messages = [{"role": "user", "content": request.prompt}]
+            payload = {
+                "model": model,
+                "messages": messages,
+                **{k: v for k, v in options.items()},
+            }
+            success, response_data, error_msg = await call_openrouter("/chat/completions", payload)
+            if not success:
+                return JSONResponse(
+                    status_code=502,
+                    content={"status": "error", "message": error_msg or "Text generation failed"},
+                )
+            result = response_data
+
+        return {
+            "ok": True,
+            "team": team_def.name,
+            "task": request.task,
+            "resolved_model": model,
+            "endpoint": task_def.endpoint,
+            "dry_run": False,
+            "result": result,
+        }
+    except Exception as exc:
+        import traceback
+        print(f"TEAM EXECUTE ERROR [{request.team}/{request.task}]: {exc}")
         print(traceback.format_exc())
         return JSONResponse(
             status_code=502,

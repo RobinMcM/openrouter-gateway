@@ -183,7 +183,45 @@ class TaskExecuteResponse(BaseModel):
     ok: bool
     task: str
     resolved_model: str
-    endpoint: str                        # "image" or "video"
+    endpoint: str                        # "image", "video", or "text"
+    dry_run: bool = False
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+# ── Team routing ──────────────────────────────────────────────────────────────
+
+class TeamRouteRequest(BaseModel):
+    team: str
+    task: str
+
+
+class TeamRouteResponse(BaseModel):
+    ok: bool
+    team: str
+    team_display_name: str
+    task: str
+    resolved_model: str
+    endpoint: str                        # "text" | "image" | "video"
+    error: Optional[str] = None
+
+
+class TeamExecuteRequest(BaseModel):
+    team: str
+    task: str
+    source: Optional[str] = None         # image/video URL for media tasks
+    prompt: Optional[str] = None
+    messages: Optional[List[Dict[str, Any]]] = None   # for text tasks
+    options: Dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+
+
+class TeamExecuteResponse(BaseModel):
+    ok: bool
+    team: str
+    task: str
+    resolved_model: str
+    endpoint: str
     dry_run: bool = False
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None

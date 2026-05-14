@@ -184,6 +184,48 @@ The calling service (MovieShakerV2 engine) is responsible for:
 - Accumulating per-user totals
 - Enforcing credit limits
 
+## Model Keys vs Model IDs
+- **model_key**: short alias used in gateway requests (e.g. `"nano-banana"`, `"kling-v3-pro"`)
+- **model_id**: full OpenRouter model string (e.g. `"google/gemini-2.5-flash-image"`)
+- Catalogues: `image_models.py` (8 entries), `video_models.py` (8 entries)
+- Default image model: `flux-2-pro`; default video model: `kling-v3-pro`
+
+## OpenRouter Model Rules
+- **Never use `:free` model IDs via API** — OpenRouter restricts free-tier models to their web UI only. API calls with `:free` suffix return 404 "No endpoints found".
+- Always use the paid model ID (e.g. `google/gemma-3-12b-it`, not `google/gemma-3-12b-it:free`)
+
+## Provider Contracts (detailed)
+
+### Image generation — 3 response shapes handled
+OpenRouter image responses vary by model. The client handles:
+1. `data.images[0].url`
+2. `choices[0].message.images[0].url`
+3. `choices[0].message.content[0].image_url.url`
+
+Gemini models require `modalities=["image","text"]` + `image_config.aspect_ratio`.
+All other models use `modalities=["image"]`.
+
+### Video generation — 3 response shapes handled
+1. `data[0].url` or `data[0].video_url`
+2. `choices[0].message.content[0].video_url.url`
+3. `choices[0].message.video_url` (dict or string)
+
+Video payload includes `video_config: {duration, aspect_ratio}`.
+If `source_image` provided, message content includes `{type: "image_url", ...}` before the text prompt.
+
+### Task system
+- Tasks are named operations (`"generate-shot"`, `"generate-image"`) with a ranked model list
+- `resolve_task()` walks the ranked list and returns the first model_key present in the live catalogue
+- Caller options are merged over task default_options
+- Registry: `app/tasks/task_registry.py` — Resolver: `app/tasks/task_router.py`
+
+## Known Limitations
+- **Image/video endpoints are synchronous** — they block a FastAPI worker thread for up to 5 minutes (video). This is intentional but limits concurrency.
+- **No streaming** — all endpoints are request-response only
+- **No file upload** — `source_image` for video must be a public URL
+- **`/api/models` is uncached** — fetches live from OpenRouter on every call
+- **Token estimation** — uses `len(text) // 4` heuristic, not actual tokenisation
+
 ## If Uncertain
 Ask before proceeding. Do not infer intent and act.
 One task at a time. Wait for confirmation before the next step.

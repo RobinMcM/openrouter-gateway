@@ -47,9 +47,9 @@ TEAM_REGISTRY: Dict[str, TeamDefinition] = {
             "film-in-a-box",
         ],
         text_models=[
+            "google/gemma-3-12b-it",
             "anthropic/claude-3.7-sonnet",
             "anthropic/claude-3-haiku",
-            "google/gemma-3-12b-it",
         ],
         image_models=[],
         video_models=[],
@@ -115,8 +115,8 @@ TEAM_REGISTRY: Dict[str, TeamDefinition] = {
             "cinematic-structure",
         ],
         text_models=[
-            "anthropic/claude-3.7-sonnet",
             "google/gemma-3-12b-it",
+            "anthropic/claude-3.7-sonnet",
         ],
         image_models=[
             "flux-2-pro",
@@ -156,8 +156,8 @@ TEAM_REGISTRY: Dict[str, TeamDefinition] = {
             "moodboard-colour",
         ],
         text_models=[
-            "anthropic/claude-3.7-sonnet",
             "google/gemma-3-12b-it",
+            "anthropic/claude-3.7-sonnet",
         ],
         image_models=[
             "nano-banana-pro",
